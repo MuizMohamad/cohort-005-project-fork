@@ -132,6 +132,8 @@ export const enrollments = sqliteTable(
       .notNull()
       .$defaultFn(() => new Date().toISOString()),
     completedAt: text("completed_at"),
+    // Set when a Refund Request is approved. Null means active access.
+    revokedAt: text("revoked_at"),
   },
   (table) => [index("enrollments_course_idx").on(table.courseId)]
 );
