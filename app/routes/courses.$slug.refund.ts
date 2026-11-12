@@ -97,14 +97,14 @@ function buildReversalEmail(input: {
 }) {
   return {
     to: input.learnerEmail,
-    subject: `Reversal requested — ${input.courseTitle}`,
+    subject: `Refund requested — ${input.courseTitle}`,
     body: [
       `Hi ${input.learnerName},`,
       "",
-      `We have your Reversal request for "${input.courseTitle}".`,
-      `The Reversal is for ${formatPrice(input.amount)}, the amount you paid.`,
+      `We have your refund request for "${input.courseTitle}".`,
+      `The refund is for ${formatPrice(input.amount)}, the amount you paid.`,
       "",
-      "Our team reviews every Reversal by hand. You do not need to do anything else — we will email you again when it is done.",
+      "Our team reviews every refund by hand. You do not need to do anything else — we will email you again when it is done.",
       "",
       "— The Cadence team",
     ].join("\n"),

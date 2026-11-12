@@ -212,11 +212,11 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
       {pendingChargebacks.length > 0 && (
         <Card className="mt-8 max-w-md">
           <CardHeader>
-            <h2 className="text-lg font-semibold">Pending Chargeback</h2>
+            <h2 className="text-lg font-semibold">Pending Refund Requests</h2>
             <p className="text-sm text-muted-foreground">
               {pendingChargebacks.length === 1
-                ? "One chargeback is waiting on us."
-                : `${pendingChargebacks.length} chargebacks are waiting on us.`}
+                ? "One refund request is waiting on us."
+                : `${pendingChargebacks.length} refund requests are waiting on us.`}
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -230,7 +230,7 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
                     {chargeback.courseTitle}
                   </Link>
                   <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-                    Pending Chargeback
+                    Pending Refund
                   </span>
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -238,6 +238,9 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
                   {new Date(chargeback.requestedAt).toLocaleDateString()}
                 </p>
                 <p className="mt-2 text-sm">{chargeback.reason}</p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  You still have access while we review your request.
+                </p>
               </div>
             ))}
           </CardContent>
