@@ -4,4 +4,4 @@ A student has one Enrollment per course, whether it came from an Individual Purc
 
 ## Consequences
 
-The code used to attach a Refund Request to the buyer's newest Purchase of the course. A student who bought for themselves and then bought a Team Licence would have refunded the wrong one. The buyer now chooses the Purchase: Individual Purchases from the course page, Team Licences from the team page.
+The buyer chooses which Purchase a Refund Request is for: Individual Purchases from the course page, Team Licences from the team page.
