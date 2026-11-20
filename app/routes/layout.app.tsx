@@ -1,4 +1,9 @@
-import { Outlet } from "react-router";
+import { Outlet, useSearchParams } from "react-router";
+import { PrototypeSwitcher } from "~/components/prototype-switcher";
+import {
+  notificationVariants,
+  useNotificationPrototype,
+} from "~/components/notification-inbox.prototype";
 import type { Route } from "./+types/layout.app";
 import { Sidebar } from "~/components/sidebar";
 import { DevUI } from "~/components/dev-ui";
@@ -227,16 +232,29 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
     isTeamAdmin: userIsTeamAdmin,
   } = loaderData;
 
+  const [searchParams] = useSearchParams();
+  const variant = searchParams.get("variant") ?? "A";
+  const proto = useNotificationPrototype(
+    variant,
+    currentUser?.role ?? null,
+    userIsTeamAdmin
+  );
+
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar
         currentUser={currentUser}
         recentCourses={recentCourses}
         isTeamAdmin={userIsTeamAdmin}
+        headerExtra={proto.sidebarHeader}
+        navTopExtra={proto.sidebarNavTop}
       />
       <main className="flex-1 overflow-y-auto">
-        <Outlet />
+        {proto.mainTop}
+        {proto.mainOverride ?? <Outlet />}
       </main>
+      {proto.overlay}
+      <PrototypeSwitcher variants={notificationVariants} current={variant} />
       <DevUI
         users={users}
         currentUser={currentUser}
