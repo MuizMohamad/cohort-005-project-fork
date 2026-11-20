@@ -92,3 +92,13 @@ A Refund where the money couldn't be sent. The Refund Request stays approved, be
 **Watch Limit**:
 The amount of Watched time on a course past which a Student can no longer get a Refund, because they've had the course.
 _Avoid_: Watch cap, Viewing threshold
+
+### Questions
+
+**Question**:
+A top-level comment on a lesson whose author is not that course's Instructor and not a Platform Admin.
+_Avoid_: Thread, post, discussion
+
+**Answer**:
+A reply to a Question by that course's Instructor or a Platform Admin.
+_Avoid_: Response, staff comment
