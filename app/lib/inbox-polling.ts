@@ -1,0 +1,24 @@
+import type { InboxItem } from "./notifications.server";
+
+// ─── Inbox polling ───
+// Keeps the bell fresh in the browser without a live connection. Runs in the
+// browser, so it only imports types from the server module.
+// See docs/specs/in-app-notifications.md, "Serving the inbox to the browser".
+
+/**
+ * Folds a check's list into the list the panel is showing. New items go on
+ * top; items already showing keep their place (with fresh details) and never
+ * vanish, so nothing jumps under the mouse.
+ */
+export function mergeInboxItems(
+  showing: InboxItem[],
+  fresh: InboxItem[]
+): InboxItem[] {
+  const showingIds = new Set(showing.map((item) => item.id));
+  const freshById = new Map(fresh.map((item) => [item.id, item]));
+
+  return [
+    ...fresh.filter((item) => !showingIds.has(item.id)),
+    ...showing.map((item) => freshById.get(item.id) ?? item),
+  ];
+}
