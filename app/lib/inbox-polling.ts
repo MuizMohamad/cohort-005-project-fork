@@ -7,32 +7,32 @@ import type { InboxCheck, InboxItem, InboxTab } from "./notifications.server";
 
 export const CHECK_INTERVAL_MS = 60_000;
 
-export type CheckOutcome =
+export type PollResult =
   | { status: "ok"; check: InboxCheck }
   | { status: "signed-out" }
   | { status: "failed" };
 
-export interface Page {
+export interface TabVisibility {
   isHidden(): boolean;
   onVisibilityChange(listener: () => void): () => void;
 }
 
 /**
- * Checks every 60 seconds while the page is visible, pauses while it is
+ * Checks every 60 seconds while the tab is visible, pauses while it is
  * hidden, and checks at once when it comes back. A failed check is ignored
  * (the next one runs 60 seconds later); a signed-out answer stops the checks.
  */
 export function startInboxPolling(
-  check: () => Promise<CheckOutcome>,
+  poll: () => Promise<PollResult>,
   onCheck: (check: InboxCheck) => void,
-  page: Page
+  visibility: TabVisibility
 ): { checkNow: () => void; stop: () => void } {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
 
   function scheduleNext() {
     clearTimeout(timer);
-    if (!stopped && !page.isHidden()) {
+    if (!stopped && !visibility.isHidden()) {
       timer = setTimeout(runCheck, CHECK_INTERVAL_MS);
     }
   }
@@ -40,15 +40,15 @@ export function startInboxPolling(
   async function runCheck() {
     clearTimeout(timer);
     if (stopped) return;
-    const outcome = await check().catch((): CheckOutcome => ({ status: "failed" }));
+    const result = await poll().catch((): PollResult => ({ status: "failed" }));
     if (stopped) return;
-    if (outcome.status === "signed-out") return stop();
-    if (outcome.status === "ok") onCheck(outcome.check);
+    if (result.status === "signed-out") return stop();
+    if (result.status === "ok") onCheck(result.check);
     scheduleNext();
   }
 
-  const stopListening = page.onVisibilityChange(() => {
-    if (page.isHidden()) clearTimeout(timer);
+  const stopListening = visibility.onVisibilityChange(() => {
+    if (visibility.isHidden()) clearTimeout(timer);
     else runCheck();
   });
 
@@ -65,7 +65,7 @@ export function startInboxPolling(
 
 export async function fetchInboxCheck(
   tab: InboxTab | null
-): Promise<CheckOutcome> {
+): Promise<PollResult> {
   const response = await fetch(
     tab ? `/api/notifications?tab=${tab}` : "/api/notifications"
   );
@@ -74,7 +74,7 @@ export async function fetchInboxCheck(
   return { status: "ok", check: await response.json() };
 }
 
-export const documentPage: Page = {
+export const documentVisibility: TabVisibility = {
   isHidden: () => document.visibilityState === "hidden",
   onVisibilityChange(listener) {
     document.addEventListener("visibilitychange", listener);
@@ -83,23 +83,19 @@ export const documentPage: Page = {
 };
 
 /**
- * The newest item across the panel's lists, by send time then id (the order
- * "mark all read" uses). A check only refreshes the open tab, so the other
- * tab's list can be older than what is showing.
+ * The newest item showing, by send time then id (the order "mark all read"
+ * uses). Merging keeps items in place, so the list's first item may not be it.
  */
-export function newestItem(...lists: InboxItem[][]): InboxItem | undefined {
-  return lists
-    .map((list) => list[0])
-    .filter((item) => item !== undefined)
-    .reduce<InboxItem | undefined>(
-      (newest, item) =>
-        !newest ||
-        item.sentAt > newest.sentAt ||
-        (item.sentAt === newest.sentAt && item.id > newest.id)
-          ? item
-          : newest,
-      undefined
-    );
+export function newestItem(items: InboxItem[]): InboxItem | undefined {
+  return items.reduce<InboxItem | undefined>(
+    (newest, item) =>
+      !newest ||
+      item.sentAt > newest.sentAt ||
+      (item.sentAt === newest.sentAt && item.id > newest.id)
+        ? item
+        : newest,
+    undefined
+  );
 }
 
 /**

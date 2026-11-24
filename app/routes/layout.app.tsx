@@ -5,7 +5,7 @@ import { DevUI } from "~/components/dev-ui";
 import { Toaster } from "sonner";
 import { getCurrentUserId, getDevCountry } from "~/lib/session";
 import { getCountryTierInfo, COUNTRIES } from "~/lib/ppp";
-import { countUnread, listInbox } from "~/lib/notifications.server";
+import { countUnread } from "~/lib/notifications.server";
 import { eq, and, or, sql, desc } from "drizzle-orm";
 import { db } from "~/db";
 import {
@@ -214,13 +214,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     countryTierInfo,
     countries: COUNTRIES,
     isTeamAdmin: currentUserId ? isTeamAdmin(currentUserId) : false,
-    // Read on every page load, page change and save, so the bell stays current.
+    // Read on every page load, page change and save, so the badge stays
+    // current. The panel loads its list from /api/notifications.
     inbox: currentUserId
-      ? {
-          unreadCount: countUnread(db, currentUserId),
-          unread: listInbox(db, currentUserId, "unread"),
-          all: listInbox(db, currentUserId, "all"),
-        }
+      ? { unreadCount: countUnread(db, currentUserId) }
       : null,
   };
 }
