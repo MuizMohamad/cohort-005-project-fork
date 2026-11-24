@@ -68,7 +68,9 @@ describe("the notification clean-up job", () => {
     raisedDaysAgo("Old By Tomorrow", 90);
 
     vi.advanceTimersByTime(ONE_DAY - 1);
-    expect(inboxTitles()).toEqual(["Sam asked for a refund on Old By Tomorrow"]);
+    expect(inboxTitles()).toEqual([
+      "Sam asked for a refund on Old By Tomorrow",
+    ]);
 
     vi.advanceTimersByTime(1);
     expect(inboxTitles()).toEqual([]);
