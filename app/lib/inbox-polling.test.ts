@@ -180,7 +180,7 @@ describe("merging a check into the list showing", () => {
     const showing = [item(2), item(1)];
 
     expect(
-      mergeInboxItems(showing, [item(4), item(3), item(2), item(1)]).map(
+      mergeInboxItems(showing, [item(4), item(3), item(2), item(1)], "all").map(
         (i) => i.id
       )
     ).toEqual([4, 3, 2, 1]);
@@ -190,17 +190,41 @@ describe("merging a check into the list showing", () => {
     const showing = [item(3), item(2), item(1)];
 
     expect(
-      mergeInboxItems(showing, [item(5), item(1)]).map((i) => i.id)
+      mergeInboxItems(showing, [item(5), item(1)], "all").map((i) => i.id)
     ).toEqual([5, 3, 2, 1]);
+  });
+
+  it("shows an item that left the Unread tab as read, in its place", () => {
+    const showing = [item(2), item(1)];
+
+    const merged = mergeInboxItems(showing, [item(1)], "unread");
+
+    expect(merged.map((i) => [i.id, i.isRead])).toEqual([
+      [2, true],
+      [1, false],
+    ]);
+  });
+
+  it("leaves an item that dropped off the All tab as it was", () => {
+    const showing = [item(2), item(1)];
+
+    const merged = mergeInboxItems(showing, [item(3), item(2)], "all");
+
+    expect(merged.map((i) => [i.id, i.isRead])).toEqual([
+      [3, false],
+      [2, false],
+      [1, false],
+    ]);
   });
 
   it("refreshes the details of items already showing", () => {
     const showing = [item(2), item(1)];
 
-    const merged = mergeInboxItems(showing, [
-      item(2, { isRead: true }),
-      item(1),
-    ]);
+    const merged = mergeInboxItems(
+      showing,
+      [item(2, { isRead: true }), item(1)],
+      "all"
+    );
 
     expect(merged[0]).toMatchObject({ id: 2, isRead: true });
   });

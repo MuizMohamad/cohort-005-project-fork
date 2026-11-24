@@ -101,17 +101,23 @@ export function newestItem(items: InboxItem[]): InboxItem | undefined {
 /**
  * Folds a check's list into the list the panel is showing. New items go on
  * top; items already showing keep their place (with fresh details) and never
- * vanish, so nothing jumps under the mouse.
+ * vanish, so nothing jumps under the mouse. An item missing from a fresh
+ * Unread list has been read, so it stays but shows as read.
  */
 export function mergeInboxItems(
   showing: InboxItem[],
-  fresh: InboxItem[]
+  fresh: InboxItem[],
+  tab: InboxTab
 ): InboxItem[] {
   const showingIds = new Set(showing.map((item) => item.id));
   const freshById = new Map(fresh.map((item) => [item.id, item]));
 
   return [
     ...fresh.filter((item) => !showingIds.has(item.id)),
-    ...showing.map((item) => freshById.get(item.id) ?? item),
+    ...showing.map(
+      (item) =>
+        freshById.get(item.id) ??
+        (tab === "unread" ? { ...item, isRead: true } : item)
+    ),
   ];
 }

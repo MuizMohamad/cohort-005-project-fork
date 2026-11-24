@@ -300,7 +300,7 @@ function useLiveInbox(inbox: Inbox, openTab: InboxTab | null) {
         if (!tab || !items || !openTabRef.current) return;
         setLists((prev) => ({
           ...prev,
-          [tab]: mergeInboxItems(prev[tab] ?? [], items),
+          [tab]: mergeInboxItems(prev[tab] ?? [], items, tab),
         }));
       },
       documentVisibility
