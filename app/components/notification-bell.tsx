@@ -5,6 +5,8 @@ import {
   Check,
   CheckCheck,
   Inbox as InboxIcon,
+  MessageCircleQuestion,
+  MessageCircleReply,
   Receipt,
   UserPlus,
   X,
@@ -29,6 +31,14 @@ function KindIcon({ kind }: { kind: NotificationKind }) {
       return <Receipt className="size-4 shrink-0 text-muted-foreground" />;
     case NotificationKind.SeatClaimed:
       return <UserPlus className="size-4 shrink-0 text-muted-foreground" />;
+    case NotificationKind.QuestionAsked:
+      return (
+        <MessageCircleQuestion className="size-4 shrink-0 text-muted-foreground" />
+      );
+    case NotificationKind.QuestionAnswered:
+      return (
+        <MessageCircleReply className="size-4 shrink-0 text-muted-foreground" />
+      );
   }
 }
 

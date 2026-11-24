@@ -2853,6 +2853,134 @@ This course is still in draft while the cluster examples are rewritten against t
     ])
     .run();
 
+  // The Instructors' and Students' inboxes for the lesson comments above: what
+  // posting each Question and Answer would have sent.
+
+  function lessonTitle(lessonId: number) {
+    return db
+      .select({ title: schema.lessons.title })
+      .from(schema.lessons)
+      .where(eq(schema.lessons.id, lessonId))
+      .get()!.title;
+  }
+
+  function questionAsked(
+    instructorId: number,
+    author: { name: string },
+    course: { title: string },
+    lessonId: number,
+    sentAt: string,
+    readAt: string | null
+  ) {
+    return {
+      recipientId: instructorId,
+      kind: NotificationKind.QuestionAsked,
+      actorName: author.name,
+      courseTitle: course.title,
+      lessonTitle: lessonTitle(lessonId),
+      href: "/instructor/questions",
+      sentAt,
+      readAt,
+    };
+  }
+
+  function questionAnswered(
+    recipientId: number,
+    answerer: { name: string },
+    course: { title: string; slug: string },
+    lessonId: number,
+    sentAt: string,
+    readAt: string | null
+  ) {
+    return {
+      recipientId,
+      kind: NotificationKind.QuestionAnswered,
+      actorName: answerer.name,
+      courseTitle: course.title,
+      lessonTitle: lessonTitle(lessonId),
+      href: `/courses/${course.slug}/lessons/${lessonId}`,
+      sentAt,
+      readAt,
+    };
+  }
+
+  db.insert(schema.notifications)
+    .values([
+      questionAsked(
+        instructor1.id,
+        students[0],
+        course1,
+        course1LessonIds[2],
+        daysAgo(30),
+        daysAgo(30)
+      ),
+      questionAnswered(
+        students[0].id,
+        instructor1,
+        course1,
+        course1LessonIds[2],
+        daysAgo(29),
+        daysAgo(29)
+      ),
+      questionAsked(
+        instructor1.id,
+        students[1],
+        course1,
+        course1LessonIds[3],
+        daysAgo(4),
+        daysAgo(3)
+      ),
+      questionAsked(
+        instructor1.id,
+        students[2],
+        course1,
+        course1LessonIds[7],
+        daysAgo(6),
+        null
+      ),
+      questionAsked(
+        instructor1.id,
+        students[4],
+        course1,
+        course1LessonIds[4],
+        daysAgo(1),
+        null
+      ),
+      questionAsked(
+        instructor2.id,
+        students[2],
+        course2,
+        course2LessonIds[0],
+        daysAgo(14),
+        daysAgo(13)
+      ),
+      questionAnswered(
+        students[2].id,
+        admin,
+        course2,
+        course2LessonIds[0],
+        daysAgo(13),
+        null
+      ),
+      questionAnswered(
+        instructor2.id,
+        admin,
+        course2,
+        course2LessonIds[0],
+        daysAgo(13),
+        null
+      ),
+      questionAsked(
+        instructor2.id,
+        students[3],
+        course2,
+        course2LessonIds[2],
+        daysAgo(9),
+        null
+      ),
+    ])
+    .run();
+
   console.log(`Created ${countRows(schema.notifications)} notifications.`);
 
   // ─── Flush watch events ───

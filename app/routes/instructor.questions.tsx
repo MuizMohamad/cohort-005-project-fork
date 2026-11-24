@@ -173,7 +173,8 @@ export async function action({ request }: Route.ActionArgs) {
       access.userId!,
       question.lessonId,
       question.id,
-      parsed.data.body
+      parsed.data.body,
+      new Date()
     );
   } catch (error) {
     if (error instanceof Error) {

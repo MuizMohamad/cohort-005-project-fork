@@ -81,6 +81,58 @@ export function sendSeatClaimed(
     .run();
 }
 
+/** The course's Instructor hears about a new Question, never its text. */
+export function sendQuestionAsked(
+  db: Queryable,
+  instructorId: number,
+  authorName: string,
+  courseTitle: string,
+  lessonTitle: string,
+  now: Date
+) {
+  db.insert(notifications)
+    .values({
+      recipientId: instructorId,
+      kind: NotificationKind.QuestionAsked,
+      actorName: authorName,
+      courseTitle,
+      lessonTitle,
+      href: "/instructor/questions",
+      sentAt: now.toISOString(),
+    })
+    .run();
+}
+
+/**
+ * The Question's author hears about an Answer, plus the Instructor when a
+ * Platform Admin wrote it. The caller picks them; never the Answer's text.
+ */
+export function sendQuestionAnswered(
+  db: Queryable,
+  recipientIds: number[],
+  answererName: string,
+  courseTitle: string,
+  lessonTitle: string,
+  href: string,
+  now: Date
+) {
+  if (recipientIds.length === 0) return;
+
+  db.insert(notifications)
+    .values(
+      recipientIds.map((recipientId) => ({
+        recipientId,
+        kind: NotificationKind.QuestionAnswered,
+        actorName: answererName,
+        courseTitle,
+        lessonTitle,
+        href,
+        sentAt: now.toISOString(),
+      }))
+    )
+    .run();
+}
+
 // ─── Showing ───
 
 function textOf(notification: Notification): string {
@@ -89,6 +141,10 @@ function textOf(notification: Notification): string {
       return `${notification.actorName} asked for a refund on ${notification.courseTitle}`;
     case NotificationKind.SeatClaimed:
       return `${notification.actorName} claimed a seat on ${notification.courseTitle}`;
+    case NotificationKind.QuestionAsked:
+      return `${notification.actorName} asked a question on ${notification.lessonTitle} in ${notification.courseTitle}`;
+    case NotificationKind.QuestionAnswered:
+      return `${notification.actorName} answered a question on ${notification.lessonTitle} in ${notification.courseTitle}`;
   }
 }
 
