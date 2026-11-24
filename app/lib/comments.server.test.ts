@@ -2,8 +2,11 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 import { postComment } from "./comments.server";
+import { listInbox } from "./notifications.server";
 
 type TestDb = ReturnType<typeof createTestDb>;
+
+const NOW = new Date(2026, 9, 6, 12, 0, 0);
 
 let db: TestDb;
 let base: ReturnType<typeof seedBaseData>;
@@ -34,7 +37,8 @@ describe("postComment", () => {
       base.user.id,
       lessonId,
       null,
-      "  How do I start?  "
+      "  How do I start?  ",
+      NOW
     );
 
     expect(comment).toMatchObject({
@@ -47,13 +51,13 @@ describe("postComment", () => {
 
   it("rejects a body that is only whitespace", () => {
     expect(() =>
-      postComment(db, base.user.id, lessonId, null, "   \n  ")
+      postComment(db, base.user.id, lessonId, null, "   \n  ", NOW)
     ).toThrow("Comment cannot be empty");
   });
 
   it("rejects a body longer than 5000 characters", () => {
     expect(() =>
-      postComment(db, base.user.id, lessonId, null, "a".repeat(5001))
+      postComment(db, base.user.id, lessonId, null, "a".repeat(5001), NOW)
     ).toThrow("Comment must be 5000 characters or fewer");
   });
 
@@ -63,7 +67,8 @@ describe("postComment", () => {
       base.user.id,
       lessonId,
       null,
-      "a".repeat(5000)
+      "a".repeat(5000),
+      NOW
     );
 
     expect(comment.body).toHaveLength(5000);
@@ -71,20 +76,28 @@ describe("postComment", () => {
 
   it("rejects a comment on a lesson that does not exist", () => {
     expect(() =>
-      postComment(db, base.user.id, 9999, null, "Hello?")
+      postComment(db, base.user.id, 9999, null, "Hello?", NOW)
     ).toThrow("Lesson not found");
   });
 
   describe("replies", () => {
     it("posts a reply under a top-level comment", () => {
-      const question = postComment(db, base.user.id, lessonId, null, "Why?");
+      const question = postComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "Why?",
+        NOW
+      );
 
       const reply = postComment(
         db,
         base.instructor.id,
         lessonId,
         question.id,
-        "Because."
+        "Because.",
+        NOW
       );
 
       expect(reply).toMatchObject({
@@ -97,7 +110,7 @@ describe("postComment", () => {
 
     it("rejects a reply to a comment that does not exist", () => {
       expect(() =>
-        postComment(db, base.instructor.id, lessonId, 9999, "Because.")
+        postComment(db, base.instructor.id, lessonId, 9999, "Because.", NOW)
       ).toThrow("Parent comment not found");
     });
 
@@ -112,27 +125,217 @@ describe("postComment", () => {
         base.user.id,
         otherLessonId,
         null,
-        "Over here"
+        "Over here",
+        NOW
       );
 
       expect(() =>
-        postComment(db, base.instructor.id, lessonId, elsewhere.id, "Hi")
+        postComment(db, base.instructor.id, lessonId, elsewhere.id, "Hi", NOW)
       ).toThrow("Parent comment belongs to a different lesson");
     });
 
     it("rejects a reply to a reply, keeping threads one level deep", () => {
-      const question = postComment(db, base.user.id, lessonId, null, "Why?");
+      const question = postComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "Why?",
+        NOW
+      );
       const reply = postComment(
         db,
         base.instructor.id,
         lessonId,
         question.id,
-        "Because."
+        "Because.",
+        NOW
       );
 
       expect(() =>
-        postComment(db, base.user.id, lessonId, reply.id, "But why?")
+        postComment(db, base.user.id, lessonId, reply.id, "But why?", NOW)
       ).toThrow("Replies can only be one level deep");
+    });
+  });
+
+  describe("notifications", () => {
+    let platformAdmin: typeof schema.users.$inferSelect;
+
+    beforeEach(() => {
+      platformAdmin = db
+        .insert(schema.users)
+        .values({
+          name: "Pat Admin",
+          email: "pat@example.com",
+          role: schema.UserRole.Admin,
+        })
+        .returning()
+        .get();
+    });
+
+    function inbox(userId: number) {
+      return listInbox(db, userId, "all").map(({ text, href }) => ({
+        text,
+        href,
+      }));
+    }
+
+    it("tells the Instructor about a Question, and nobody else", () => {
+      postComment(db, base.user.id, lessonId, null, "How do I start?", NOW);
+
+      expect(inbox(base.instructor.id)).toEqual([
+        {
+          text: "Test User asked a question on Lesson 1 in Test Course",
+          href: "/instructor/questions",
+        },
+      ]);
+      expect(inbox(base.user.id)).toEqual([]);
+      expect(inbox(platformAdmin.id)).toEqual([]);
+    });
+
+    it("sends nothing for a top-level comment by the Instructor or a Platform Admin", () => {
+      postComment(db, base.instructor.id, lessonId, null, "Welcome!", NOW);
+      postComment(db, platformAdmin.id, lessonId, null, "Hello all", NOW);
+
+      expect(inbox(base.instructor.id)).toEqual([]);
+      expect(inbox(platformAdmin.id)).toEqual([]);
+      expect(inbox(base.user.id)).toEqual([]);
+    });
+
+    it("tells only the Question's author when the Instructor answers it", () => {
+      const question = postComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "Why?",
+        NOW
+      );
+
+      postComment(
+        db,
+        base.instructor.id,
+        lessonId,
+        question.id,
+        "Because.",
+        NOW
+      );
+
+      expect(inbox(base.user.id)).toEqual([
+        {
+          text: "Test Instructor answered a question on Lesson 1 in Test Course",
+          href: `/courses/test-course/lessons/${lessonId}`,
+        },
+      ]);
+      expect(inbox(base.instructor.id)).toHaveLength(1);
+      expect(inbox(platformAdmin.id)).toEqual([]);
+    });
+
+    it("tells the author and the Instructor when a Platform Admin answers", () => {
+      const question = postComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "Why?",
+        NOW
+      );
+
+      postComment(db, platformAdmin.id, lessonId, question.id, "Hi!", NOW);
+
+      const answered = {
+        text: "Pat Admin answered a question on Lesson 1 in Test Course",
+        href: `/courses/test-course/lessons/${lessonId}`,
+      };
+      expect(inbox(base.user.id)).toEqual([answered]);
+      expect(inbox(base.instructor.id)).toContainEqual(answered);
+      expect(inbox(platformAdmin.id)).toEqual([]);
+    });
+
+    it("sends nothing for a reply by someone who is not staff", () => {
+      const otherStudent = db
+        .insert(schema.users)
+        .values({
+          name: "Other Student",
+          email: "other@example.com",
+          role: schema.UserRole.Student,
+        })
+        .returning()
+        .get();
+      const question = postComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "Why?",
+        NOW
+      );
+
+      postComment(db, otherStudent.id, lessonId, question.id, "Same!", NOW);
+      postComment(db, base.user.id, lessonId, question.id, "Anyone?", NOW);
+
+      expect(inbox(base.user.id)).toEqual([]);
+      expect(inbox(otherStudent.id)).toEqual([]);
+      expect(inbox(base.instructor.id)).toHaveLength(1);
+    });
+
+    it("sends nothing for staff replies under a staff comment", () => {
+      const notice = postComment(
+        db,
+        base.instructor.id,
+        lessonId,
+        null,
+        "Welcome!",
+        NOW
+      );
+
+      postComment(db, platformAdmin.id, lessonId, notice.id, "Thanks", NOW);
+
+      expect(inbox(base.instructor.id)).toEqual([]);
+      expect(inbox(platformAdmin.id)).toEqual([]);
+    });
+
+    it("sends one notification per Answer", () => {
+      const question = postComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "Why?",
+        NOW
+      );
+
+      postComment(db, base.instructor.id, lessonId, question.id, "One", NOW);
+      postComment(db, base.instructor.id, lessonId, question.id, "Two", NOW);
+
+      expect(inbox(base.user.id)).toHaveLength(2);
+    });
+
+    it("never shows the Question or Answer text", () => {
+      const question = postComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "My secret question",
+        NOW
+      );
+      postComment(
+        db,
+        platformAdmin.id,
+        lessonId,
+        question.id,
+        "My secret answer",
+        NOW
+      );
+
+      const texts = [base.user.id, base.instructor.id].flatMap((id) =>
+        inbox(id).map((item) => item.text)
+      );
+      expect(texts).toHaveLength(3);
+      for (const text of texts) {
+        expect(text).not.toContain("secret");
+      }
     });
   });
 });

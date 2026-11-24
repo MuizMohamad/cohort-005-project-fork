@@ -1,7 +1,6 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
-import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { alias } from "drizzle-orm/sqlite-core";
-import * as schema from "~/db/schema";
+import type { Db, Queryable } from "~/db";
 import {
   coupons,
   courses,
@@ -15,9 +14,13 @@ import {
   videoWatchEvents,
   LessonProgressStatus,
   RefundStatus,
+  type RefundDecision,
 } from "~/db/schema";
 import { formatPrice } from "~/lib/utils";
-import { sendRefundRequestRaised } from "~/lib/notifications.server";
+import {
+  sendRefundRequestDecided,
+  sendRefundRequestRaised,
+} from "~/lib/notifications.server";
 import {
   REFUND_COMPLETION_LIMIT,
   REFUND_WATCH_LIMIT_SECONDS,
@@ -32,10 +35,6 @@ import {
 //
 // Every function takes the database first, so tests can hand in an in-memory
 // one. Uses positional parameters (project convention).
-
-export type Db = BetterSQLite3Database<typeof schema>;
-type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
-type Queryable = Db | Tx;
 
 type Purchase = typeof purchases.$inferSelect;
 type Seat = typeof coupons.$inferSelect;
@@ -394,7 +393,11 @@ export function raiseRefundRequest(
       .returning()
       .get();
 
-    sendRefundRequestRaised(tx, buyer.id, buyer.name, course.title, now);
+    sendRefundRequestRaised(
+      tx,
+      { buyerId: buyer.id, courseId: course.id },
+      now
+    );
 
     return {
       ok: true,
@@ -695,6 +698,18 @@ export function approveRefundRequest(
       .where(eq(refunds.id, refundRequestId))
       .run();
 
+    sendRefundRequestDecided(
+      tx,
+      {
+        buyerId: purchase.userId,
+        deciderId: platformAdminId,
+        courseId: purchase.courseId,
+        outcome: RefundStatus.Approved,
+        note,
+      },
+      now
+    );
+
     return {
       ok: true,
       email: buildDecisionEmail(tx, purchase, RefundStatus.Approved, note),
@@ -738,6 +753,18 @@ export function declineRefundRequest(
       .where(eq(refunds.id, refundRequestId))
       .run();
 
+    sendRefundRequestDecided(
+      tx,
+      {
+        buyerId: found.purchase.userId,
+        deciderId: platformAdminId,
+        courseId: found.purchase.courseId,
+        outcome: RefundStatus.Declined,
+        note: trimmedNote,
+      },
+      now
+    );
+
     return {
       ok: true,
       email: buildDecisionEmail(
@@ -754,7 +781,7 @@ export function declineRefundRequest(
 function buildDecisionEmail(
   db: Queryable,
   purchase: Purchase,
-  decision: RefundStatus.Approved | RefundStatus.Declined,
+  decision: RefundDecision,
   note: string | null
 ): Email {
   const buyer = db

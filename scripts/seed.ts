@@ -15,6 +15,13 @@ import {
   TeamMemberRole,
   NotificationKind,
 } from "../app/db/schema";
+import {
+  REFUNDS_REVIEW_HREF,
+  TEAM_HREF,
+  UNANSWERED_QUESTIONS_HREF,
+  courseHref,
+  lessonHref,
+} from "../app/lib/notifications.server";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,6 +45,10 @@ function hoursAgo(n: number): string {
   const d = new Date();
   d.setHours(d.getHours() - n);
   return d.toISOString();
+}
+
+function minutesAgo(n: number): string {
+  return new Date(Date.now() - n * 60_000).toISOString();
 }
 
 function slugify(title: string): string {
@@ -104,7 +115,7 @@ async function seed() {
   }
 
   // ─── Users ───
-  // 1 admin, 3 instructors (one of whom owns no courses, so the empty
+  // 2 admins, 3 instructors (one of whom owns no courses, so the empty
   // instructor dashboard is reachable), and ~40 students.
   //
   // Students are split in two: the five named students below, who own all the
@@ -122,6 +133,19 @@ async function seed() {
       role: UserRole.Admin,
       avatarUrl: "https://api.dicebear.com/9.x/avataaars/svg?seed=alex",
       createdAt: daysAgo(120),
+    })
+    .returning()
+    .all();
+
+  // A second Platform Admin, so one can see the other's refund decisions.
+  const [secondAdmin] = db
+    .insert(schema.users)
+    .values({
+      name: "Sam Okafor",
+      email: "sam.okafor@ralph.dev",
+      role: UserRole.Admin,
+      avatarUrl: "https://api.dicebear.com/9.x/avataaars/svg?seed=sam",
+      createdAt: daysAgo(90),
     })
     .returning()
     .all();
@@ -268,7 +292,7 @@ async function seed() {
   const studentCount = allStudents.length;
 
   console.log(
-    `Created ${1 + instructorCount + studentCount} users (1 admin, ${instructorCount} instructors, ${studentCount} students).`
+    `Created ${2 + instructorCount + studentCount} users (2 admins, ${instructorCount} instructors, ${studentCount} students).`
   );
 
   // ─── Categories ───
@@ -1789,7 +1813,8 @@ This course is still in draft while the cluster examples are rewritten against t
   // - James: enrolled in course 1 only (completed)
   // - Olivia: enrolled in both courses (just started course 1, mid-way in course 2)
   // - Liam: enrolled in course 2 only (just started, abandoned)
-  // - Sophia: enrolled in course 1 only (recently enrolled, barely started)
+  // - Sophia: enrolled in course 1 (recently enrolled, barely started); she
+  //   also claims one of Bossy's Seats on course 2 today, further down
 
   db.insert(schema.enrollments)
     .values([
@@ -1911,7 +1936,22 @@ This course is still in draft while the cluster examples are rewritten against t
     lessonId: course1LessonIds[4],
     userId: students[4].id,
     body: "Is there a reason to prefer `interface` over `type` here, or is it purely style?",
-    createdAt: daysAgo(1),
+    createdAt: minutesAgo(25),
+  });
+
+  // Asked and answered today, so Emma and Sarah have something in Today.
+  const c1q7 = comment({
+    lessonId: course1LessonIds[5],
+    userId: students[0].id,
+    body: "Should I be using `unknown` instead of `any` for the parsed JSON here?",
+    createdAt: minutesAgo(90),
+  });
+  comment({
+    lessonId: course1LessonIds[5],
+    userId: instructor1.id,
+    parentId: c1q7.id,
+    body: "Yes — `unknown` makes you narrow it before use, which is exactly what you want for data from outside.",
+    createdAt: minutesAgo(30),
   });
 
   // Another student replied, but no staff has — still counts as unanswered.
@@ -2355,6 +2395,16 @@ This course is still in draft while the cluster examples are rewritten against t
     .where(eq(schema.coupons.id, seededCoupons[1].id))
     .run();
 
+  // Sophia claimed a third Seat today, so Bossy's inbox has something in Today.
+  const sophia = studentByEmail("sophia.davis@student.dev");
+  db.update(schema.coupons)
+    .set({ redeemedByUserId: sophia.id, redeemedAt: minutesAgo(15) })
+    .where(eq(schema.coupons.id, seededCoupons[2].id))
+    .run();
+  db.insert(schema.enrollments)
+    .values({ userId: sophia.id, courseId: course2.id, enrolledAt: minutesAgo(15) })
+    .run();
+
   console.log(
     `Created 1 team with Bossy McBossface as admin, 1 team purchase, and ${seededCoupons.length} coupons (${countRows(schema.coupons, isNotNull(schema.coupons.redeemedByUserId))} redeemed, ${countRows(schema.coupons, isNull(schema.coupons.redeemedByUserId))} available).`
   );
@@ -2774,13 +2824,27 @@ This course is still in draft while the cluster examples are rewritten against t
       updatedAt: daysAgo(6),
     })
     .run();
+  // Sam declined Liam's first try, so Liam asked again with more detail.
+  const declinedNote =
+    "Could you tell us which course you meant to buy? Happy to look again once we know.";
   db.insert(schema.refunds)
-    .values({
-      purchaseId: liamPurchase.id,
-      status: RefundStatus.Open,
-      reason: "Bought the wrong one, I meant the advanced course.",
-      requestedAt: daysAgo(4),
-    })
+    .values([
+      {
+        purchaseId: liamPurchase.id,
+        status: RefundStatus.Declined,
+        reason: "Not for me.",
+        requestedAt: daysAgo(8),
+        decisionNote: declinedNote,
+        resolvedAt: daysAgo(7),
+        resolvedByUserId: secondAdmin.id,
+      },
+      {
+        purchaseId: liamPurchase.id,
+        status: RefundStatus.Open,
+        reason: "Bought the wrong one, I meant the advanced course.",
+        requestedAt: daysAgo(4),
+      },
+    ])
     .run();
 
   console.log("Created Liam's Refund Request.");
@@ -2794,16 +2858,18 @@ This course is still in draft while the cluster examples are rewritten against t
       purchaseId: novakLicence.purchase.id,
       status: RefundStatus.Open,
       reason: "Our design team was reorganised and nobody needs these seats now.",
-      requestedAt: daysAgo(1),
+      requestedAt: minutesAgo(40),
     })
     .run();
 
   console.log("Created Marta's Refund Request on her Team Licence.");
 
   // ─── Notifications ───
-  // The Platform Admin's inbox for the two Refund Requests above: Liam's
-  // already read, Marta's still unread.
+  // What each event above would have sent, so every DevUI user's inbox has
+  // read and unread items, some from today and some older.
 
+  // The Platform Admins' inboxes for the two Refund Requests above: Liam's
+  // already read by Alex, Marta's from today still unread.
   const marta = studentByEmail("marta.novak@student.dev");
   db.insert(schema.notifications)
     .values([
@@ -2812,7 +2878,7 @@ This course is still in draft while the cluster examples are rewritten against t
         kind: NotificationKind.RefundRequestRaised,
         actorName: liam.name,
         courseTitle: course1.title,
-        href: "/admin/refunds",
+        href: REFUNDS_REVIEW_HREF,
         sentAt: daysAgo(4),
         readAt: daysAgo(3),
       },
@@ -2821,15 +2887,61 @@ This course is still in draft while the cluster examples are rewritten against t
         kind: NotificationKind.RefundRequestRaised,
         actorName: marta.name,
         courseTitle: course3.title,
-        href: "/admin/refunds",
-        sentAt: daysAgo(1),
+        href: REFUNDS_REVIEW_HREF,
+        sentAt: minutesAgo(40),
         readAt: null,
       },
     ])
     .run();
 
-  // Bossy's inbox for the two Seats claimed on his Team Licence above:
-  // Olivia's already read, Liam's still unread.
+  // Sam's decline of Liam's first Refund Request: Liam hears the outcome and
+  // note, Alex hears who decided. Sam also has the two open requests unread.
+  db.insert(schema.notifications)
+    .values([
+      {
+        recipientId: liam.id,
+        kind: NotificationKind.RefundRequestDecided,
+        actorName: secondAdmin.name,
+        courseTitle: course1.title,
+        outcome: RefundStatus.Declined,
+        note: declinedNote,
+        href: courseHref(course1.slug),
+        sentAt: daysAgo(7),
+        readAt: daysAgo(6),
+      },
+      {
+        recipientId: admin.id,
+        kind: NotificationKind.RefundRequestDecidedByOther,
+        actorName: secondAdmin.name,
+        courseTitle: course1.title,
+        outcome: RefundStatus.Declined,
+        href: REFUNDS_REVIEW_HREF,
+        sentAt: daysAgo(7),
+        readAt: null,
+      },
+      {
+        recipientId: secondAdmin.id,
+        kind: NotificationKind.RefundRequestRaised,
+        actorName: liam.name,
+        courseTitle: course1.title,
+        href: REFUNDS_REVIEW_HREF,
+        sentAt: daysAgo(4),
+        readAt: null,
+      },
+      {
+        recipientId: secondAdmin.id,
+        kind: NotificationKind.RefundRequestRaised,
+        actorName: marta.name,
+        courseTitle: course3.title,
+        href: REFUNDS_REVIEW_HREF,
+        sentAt: minutesAgo(40),
+        readAt: null,
+      },
+    ])
+    .run();
+
+  // Bossy's inbox for the three Seats claimed on his Team Licence above:
+  // Olivia's already read, Liam's and today's from Sophia still unread.
   db.insert(schema.notifications)
     .values([
       {
@@ -2837,7 +2949,7 @@ This course is still in draft while the cluster examples are rewritten against t
         kind: NotificationKind.SeatClaimed,
         actorName: studentByEmail("olivia.martinez@student.dev").name,
         courseTitle: course2.title,
-        href: "/team",
+        href: TEAM_HREF,
         sentAt: daysAgo(30),
         readAt: daysAgo(29),
       },
@@ -2846,10 +2958,165 @@ This course is still in draft while the cluster examples are rewritten against t
         kind: NotificationKind.SeatClaimed,
         actorName: liam.name,
         courseTitle: course2.title,
-        href: "/team",
+        href: TEAM_HREF,
         sentAt: daysAgo(25),
         readAt: null,
       },
+      {
+        recipientId: bossy.id,
+        kind: NotificationKind.SeatClaimed,
+        actorName: sophia.name,
+        courseTitle: course2.title,
+        href: TEAM_HREF,
+        sentAt: minutesAgo(15),
+        readAt: null,
+      },
+    ])
+    .run();
+
+  // The Instructors' and Students' inboxes for the lesson comments above: what
+  // posting each Question and Answer would have sent.
+
+  function lessonTitle(lessonId: number) {
+    const lesson = db
+      .select({ title: schema.lessons.title })
+      .from(schema.lessons)
+      .where(eq(schema.lessons.id, lessonId))
+      .get();
+    if (!lesson) throw new Error(`No lesson ${lessonId} to notify about`);
+    return lesson.title;
+  }
+
+  function questionAsked(
+    instructorId: number,
+    author: { name: string },
+    course: { title: string },
+    lessonId: number,
+    sentAt: string,
+    readAt: string | null
+  ) {
+    return {
+      recipientId: instructorId,
+      kind: NotificationKind.QuestionAsked,
+      actorName: author.name,
+      courseTitle: course.title,
+      lessonTitle: lessonTitle(lessonId),
+      href: UNANSWERED_QUESTIONS_HREF,
+      sentAt,
+      readAt,
+    };
+  }
+
+  function questionAnswered(
+    recipientId: number,
+    answerer: { name: string },
+    course: { title: string; slug: string },
+    lessonId: number,
+    sentAt: string,
+    readAt: string | null
+  ) {
+    return {
+      recipientId,
+      kind: NotificationKind.QuestionAnswered,
+      actorName: answerer.name,
+      courseTitle: course.title,
+      lessonTitle: lessonTitle(lessonId),
+      href: lessonHref(course.slug, lessonId),
+      sentAt,
+      readAt,
+    };
+  }
+
+  db.insert(schema.notifications)
+    .values([
+      questionAsked(
+        instructor1.id,
+        students[0],
+        course1,
+        course1LessonIds[2],
+        daysAgo(30),
+        daysAgo(30)
+      ),
+      questionAnswered(
+        students[0].id,
+        instructor1,
+        course1,
+        course1LessonIds[2],
+        daysAgo(29),
+        daysAgo(29)
+      ),
+      questionAsked(
+        instructor1.id,
+        students[1],
+        course1,
+        course1LessonIds[3],
+        daysAgo(4),
+        daysAgo(3)
+      ),
+      questionAsked(
+        instructor1.id,
+        students[2],
+        course1,
+        course1LessonIds[7],
+        daysAgo(6),
+        null
+      ),
+      questionAsked(
+        instructor1.id,
+        students[4],
+        course1,
+        course1LessonIds[4],
+        minutesAgo(25),
+        null
+      ),
+      questionAsked(
+        instructor1.id,
+        students[0],
+        course1,
+        course1LessonIds[5],
+        minutesAgo(90),
+        minutesAgo(30)
+      ),
+      questionAnswered(
+        students[0].id,
+        instructor1,
+        course1,
+        course1LessonIds[5],
+        minutesAgo(30),
+        null
+      ),
+      questionAsked(
+        instructor2.id,
+        students[2],
+        course2,
+        course2LessonIds[0],
+        daysAgo(14),
+        daysAgo(13)
+      ),
+      questionAnswered(
+        students[2].id,
+        admin,
+        course2,
+        course2LessonIds[0],
+        daysAgo(13),
+        null
+      ),
+      questionAnswered(
+        instructor2.id,
+        admin,
+        course2,
+        course2LessonIds[0],
+        daysAgo(13),
+        null
+      ),
+      questionAsked(
+        instructor2.id,
+        students[3],
+        course2,
+        course2LessonIds[2],
+        daysAgo(9),
+        null
+      ),
     ])
     .run();
 

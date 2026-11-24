@@ -1,19 +1,26 @@
 import { eq } from "drizzle-orm";
-import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import * as schema from "~/db/schema";
-import { comments, courses, lessons, modules } from "~/db/schema";
+import type { Db, Queryable } from "~/db";
+import {
+  comments,
+  courses,
+  lessons,
+  modules,
+  users,
+  UserRole,
+} from "~/db/schema";
 import { MAX_COMMENT_LENGTH, MIN_COMMENT_LENGTH } from "~/lib/comments";
+import {
+  sendQuestionAnswered,
+  sendQuestionAsked,
+} from "~/lib/notifications.server";
 
 // ─── Comments ───
-// Posting a comment or reply on a lesson. Editing and deleting still live in
-// the lesson route.
+// Posting a comment or reply on a lesson, and telling the right people when it
+// is a Question or an Answer (see GLOSSARY.md). Editing and deleting still
+// live in the lesson route and send nothing.
 //
 // Every function takes the database first, so tests can hand in an in-memory
 // one. Uses positional parameters (project convention).
-
-export type Db = BetterSQLite3Database<typeof schema>;
-type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
-type Queryable = Db | Tx;
 
 /** Trims a comment body, throwing if it is empty or too long. */
 export function checkCommentBody(body: string) {
@@ -29,13 +36,30 @@ export function checkCommentBody(body: string) {
   return trimmed;
 }
 
-function getCommentById(db: Queryable, commentId: number) {
+export function getCommentById(db: Queryable, commentId: number) {
   return db.select().from(comments).where(eq(comments.id, commentId)).get();
 }
 
-function getCourseForLesson(db: Queryable, lessonId: number) {
+function getUserById(db: Queryable, userId: number) {
+  return db.select().from(users).where(eq(users.id, userId)).get();
+}
+
+/**
+ * The course's Instructor and Platform Admins: their replies to a Question are
+ * Answers, and their top-level comments are never Questions.
+ */
+function canAnswer(user: { id: number; role: UserRole }, instructorId: number) {
+  return user.id === instructorId || user.role === UserRole.Admin;
+}
+
+export function getCourseForLesson(db: Queryable, lessonId: number) {
   return db
-    .select({ courseId: courses.id, instructorId: courses.instructorId })
+    .select({
+      courseId: courses.id,
+      courseTitle: courses.title,
+      courseSlug: courses.slug,
+      instructorId: courses.instructorId,
+    })
     .from(lessons)
     .innerJoin(modules, eq(lessons.moduleId, modules.id))
     .innerJoin(courses, eq(modules.courseId, courses.id))
@@ -52,7 +76,8 @@ export function postComment(
   userId: number,
   lessonId: number,
   parentId: number | null,
-  body: string
+  body: string,
+  now: Date
 ) {
   const trimmed = checkCommentBody(body);
 
@@ -62,8 +87,8 @@ export function postComment(
       throw new Error("Lesson not found");
     }
 
+    const parent = parentId === null ? null : getCommentById(tx, parentId);
     if (parentId !== null) {
-      const parent = getCommentById(tx, parentId);
       if (!parent) {
         throw new Error("Parent comment not found");
       }
@@ -75,10 +100,38 @@ export function postComment(
       }
     }
 
-    return tx
+    const comment = tx
       .insert(comments)
       .values({ userId, lessonId, parentId, body: trimmed })
       .returning()
       .get();
+
+    const author = getUserById(tx, userId);
+    if (!author) {
+      throw new Error("User not found");
+    }
+    const authorCanAnswer = canAnswer(author, course.instructorId);
+
+    if (!parent) {
+      if (!authorCanAnswer) {
+        sendQuestionAsked(tx, { authorId: userId, lessonId }, now);
+      }
+      return comment;
+    }
+
+    const questionAuthor = getUserById(tx, parent.userId);
+    const isAnswer =
+      authorCanAnswer &&
+      questionAuthor !== undefined &&
+      !canAnswer(questionAuthor, course.instructorId);
+    if (isAnswer) {
+      sendQuestionAnswered(
+        tx,
+        { questionAuthorId: questionAuthor.id, answererId: userId, lessonId },
+        now
+      );
+    }
+
+    return comment;
   });
 }
