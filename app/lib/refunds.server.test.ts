@@ -506,6 +506,37 @@ describe("declining a Refund Request", () => {
   });
 });
 
+describe("notifying people of a decided Refund Request", () => {
+  function addPlatformAdmin(name: string) {
+    return db
+      .insert(schema.users)
+      .values({
+        name,
+        email: `${name.toLowerCase()}@example.com`,
+        role: UserRole.Admin,
+      })
+      .returning()
+      .get();
+  }
+
+  it("tells the buyer it was approved, with a tick and no second line when there is no note", () => {
+    const purchase = buyForSelf(base.user.id);
+    const id = raise(purchase.id, base.user.id);
+
+    approveRefundRequest(db, id, platformAdmin.id, null, NOW);
+
+    expect(listInbox(db, base.user.id, "unread", NOW)).toEqual([
+      expect.objectContaining({
+        kind: NotificationKind.RefundRequestDecided,
+        text: "Your refund on Test Course was approved",
+        outcome: RefundStatus.Approved,
+        secondLine: null,
+        href: "/courses/test-course",
+      }),
+    ]);
+  });
+});
+
 describe("listing Refund Requests", () => {
   it("shows a Platform Admin live figures and the rules a request breaks", () => {
     const purchase = buyForSelf(base.user.id);

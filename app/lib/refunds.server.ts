@@ -17,7 +17,10 @@ import {
   RefundStatus,
 } from "~/db/schema";
 import { formatPrice } from "~/lib/utils";
-import { sendRefundRequestRaised } from "~/lib/notifications.server";
+import {
+  sendRefundRequestDecided,
+  sendRefundRequestRaised,
+} from "~/lib/notifications.server";
 import {
   REFUND_COMPLETION_LIMIT,
   REFUND_WATCH_LIMIT_SECONDS,
@@ -695,6 +698,8 @@ export function approveRefundRequest(
       .where(eq(refunds.id, refundRequestId))
       .run();
 
+    notifyDecision(tx, purchase, platformAdminId, RefundStatus.Approved, note, now);
+
     return {
       ok: true,
       email: buildDecisionEmail(tx, purchase, RefundStatus.Approved, note),
@@ -748,6 +753,39 @@ export function declineRefundRequest(
       ),
     };
   });
+}
+
+function notifyDecision(
+  tx: Queryable,
+  purchase: Purchase,
+  platformAdminId: number,
+  decision: RefundStatus.Approved | RefundStatus.Declined,
+  note: string | null,
+  now: Date
+) {
+  const decider = tx
+    .select()
+    .from(users)
+    .where(eq(users.id, platformAdminId))
+    .get();
+  const course = tx
+    .select()
+    .from(courses)
+    .where(eq(courses.id, purchase.courseId))
+    .get();
+  if (!decider || !course) return;
+
+  sendRefundRequestDecided(
+    tx,
+    purchase.userId,
+    decider.id,
+    decider.name,
+    course.title,
+    course.slug,
+    decision,
+    note,
+    now
+  );
 }
 
 /** The email the buyer gets once their Refund Request is decided. */
