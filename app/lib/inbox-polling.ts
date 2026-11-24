@@ -83,6 +83,26 @@ export const documentPage: Page = {
 };
 
 /**
+ * The newest item across the panel's lists, by send time then id (the order
+ * "mark all read" uses). A check only refreshes the open tab, so the other
+ * tab's list can be older than what is showing.
+ */
+export function newestItem(...lists: InboxItem[][]): InboxItem | undefined {
+  return lists
+    .map((list) => list[0])
+    .filter((item) => item !== undefined)
+    .reduce<InboxItem | undefined>(
+      (newest, item) =>
+        !newest ||
+        item.sentAt > newest.sentAt ||
+        (item.sentAt === newest.sentAt && item.id > newest.id)
+          ? item
+          : newest,
+      undefined
+    );
+}
+
+/**
  * Folds a check's list into the list the panel is showing. New items go on
  * top; items already showing keep their place (with fresh details) and never
  * vanish, so nothing jumps under the mouse.

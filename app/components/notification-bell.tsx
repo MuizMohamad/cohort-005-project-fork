@@ -18,6 +18,7 @@ import {
   documentPage,
   fetchInboxCheck,
   mergeInboxItems,
+  newestItem,
   startInboxPolling,
 } from "~/lib/inbox-polling";
 import { NotificationKind, RefundStatus } from "~/db/schema";
@@ -212,8 +213,7 @@ function NotificationPanel({
   onClose: () => void;
 }) {
   const items = tab === "unread" ? inbox.unread : inbox.all;
-  // All holds the newest items of every kind, so its first is the newest shown.
-  const newestShown = inbox.all[0];
+  const newestShown = newestItem(inbox.unread, inbox.all);
 
   return (
     <>

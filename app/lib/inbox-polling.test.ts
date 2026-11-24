@@ -3,6 +3,7 @@ import { NotificationKind } from "~/db/schema";
 import type { InboxCheck, InboxItem } from "./notifications.server";
 import {
   mergeInboxItems,
+  newestItem,
   startInboxPolling,
   type CheckOutcome,
 } from "./inbox-polling";
@@ -156,6 +157,24 @@ function item(id: number, overrides: Partial<InboxItem> = {}): InboxItem {
     ...overrides,
   };
 }
+
+describe("finding the newest item the panel holds", () => {
+  it("looks across both tabs, so a check's new item counts as seen", () => {
+    const unread = [item(9, { sentAt: "2026-10-06T12:05:00.000Z" })];
+    const all = [item(7, { sentAt: "2026-10-06T12:00:00.000Z" })];
+
+    expect(newestItem(unread, all)?.id).toBe(9);
+    expect(newestItem(all, unread)?.id).toBe(9);
+  });
+
+  it("breaks a tie on send time by the later id", () => {
+    expect(newestItem([item(3)], [item(4)])?.id).toBe(4);
+  });
+
+  it("has none when both tabs are empty", () => {
+    expect(newestItem([], [])).toBeUndefined();
+  });
+});
 
 describe("merging a check into the list showing", () => {
   it("adds new items at the top", () => {
