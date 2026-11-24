@@ -55,12 +55,40 @@ export function sendRefundRequestRaised(
     .run();
 }
 
+/**
+ * The Team Admin who bought the Team Licence hears about each Seat claimed,
+ * unless they claimed it themselves.
+ */
+export function sendSeatClaimed(
+  db: Queryable,
+  teamAdminId: number,
+  studentId: number,
+  studentName: string,
+  courseTitle: string,
+  now: Date
+) {
+  if (teamAdminId === studentId) return;
+
+  db.insert(notifications)
+    .values({
+      recipientId: teamAdminId,
+      kind: NotificationKind.SeatClaimed,
+      actorName: studentName,
+      courseTitle,
+      href: "/team",
+      sentAt: now.toISOString(),
+    })
+    .run();
+}
+
 // ─── Showing ───
 
 function textOf(notification: Notification): string {
   switch (notification.kind) {
     case NotificationKind.RefundRequestRaised:
       return `${notification.actorName} asked for a refund on ${notification.courseTitle}`;
+    case NotificationKind.SeatClaimed:
+      return `${notification.actorName} claimed a seat on ${notification.courseTitle}`;
   }
 }
 

@@ -6,6 +6,7 @@ import {
   CheckCheck,
   Inbox as InboxIcon,
   Receipt,
+  UserPlus,
   X,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
@@ -26,6 +27,8 @@ function KindIcon({ kind }: { kind: NotificationKind }) {
   switch (kind) {
     case NotificationKind.RefundRequestRaised:
       return <Receipt className="size-4 shrink-0 text-muted-foreground" />;
+    case NotificationKind.SeatClaimed:
+      return <UserPlus className="size-4 shrink-0 text-muted-foreground" />;
   }
 }
 
