@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
-import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import * as schema from "~/db/schema";
+import type { Db, Queryable } from "~/db";
 import {
   comments,
   courses,
@@ -22,10 +21,6 @@ import {
 //
 // Every function takes the database first, so tests can hand in an in-memory
 // one. Uses positional parameters (project convention).
-
-export type Db = BetterSQLite3Database<typeof schema>;
-type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
-type Queryable = Db | Tx;
 
 /** Trims a comment body, throwing if it is empty or too long. */
 export function checkCommentBody(body: string) {

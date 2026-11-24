@@ -1,12 +1,9 @@
-import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import * as schema from "~/db/schema";
+import type { Db } from "~/db";
 import { deleteOldNotifications } from "./notifications.server";
 
 // ─── Notification clean-up job ───
 // Cadence's first timed job. Deletes old notifications once at start-up and
 // then once a day, inside the server process, apart from any save.
-
-type Db = BetterSQLite3Database<typeof schema>;
 
 const ONE_DAY = 24 * 60 * 60_000;
 
