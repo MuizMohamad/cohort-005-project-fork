@@ -69,4 +69,23 @@ describe("claimSeat", () => {
       }),
     });
   });
+
+  it("refuses a code that matches no Seat", () => {
+    const student = addUser("Sam");
+
+    expect(claimSeat(db, "NO-SUCH-SEAT", student.id, "AU", NOW)).toEqual({
+      ok: false,
+      error: "Coupon not found",
+    });
+  });
+
+  it("refuses a Seat someone has already claimed", () => {
+    const seat = buySeat();
+    claimSeat(db, seat.code, addUser("Sam").id, "AU", NOW);
+
+    expect(claimSeat(db, seat.code, addUser("Kim").id, "AU", NOW)).toEqual({
+      ok: false,
+      error: "Coupon has already been redeemed",
+    });
+  });
 });

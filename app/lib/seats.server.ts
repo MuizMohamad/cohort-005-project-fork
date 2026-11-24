@@ -31,15 +31,22 @@ export function claimSeat(
 ): ClaimResult {
   return db.transaction((tx): ClaimResult => {
     const seat = tx.select().from(coupons).where(eq(coupons.code, code)).get();
+    if (!seat) {
+      return { ok: false, error: "Coupon not found" };
+    }
+
+    if (seat.redeemedByUserId !== null) {
+      return { ok: false, error: "Coupon has already been redeemed" };
+    }
 
     tx.update(coupons)
       .set({ redeemedByUserId: studentId, redeemedAt: now.toISOString() })
-      .where(eq(coupons.id, seat!.id))
+      .where(eq(coupons.id, seat.id))
       .run();
 
     const enrollment = tx
       .insert(enrollments)
-      .values({ userId: studentId, courseId: seat!.courseId })
+      .values({ userId: studentId, courseId: seat.courseId })
       .returning()
       .get();
 
