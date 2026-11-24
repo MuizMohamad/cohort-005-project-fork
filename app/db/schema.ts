@@ -44,6 +44,13 @@ export enum TeamMemberRole {
 
 export enum NotificationKind {
   RefundRequestRaised = "refund_request_raised",
+  // A decided Refund Request reads differently for the buyer and for the
+  // other Platform Admins, so each side has its own kind.
+  RefundRequestDecided = "refund_request_decided",
+  RefundRequestDecidedByOther = "refund_request_decided_by_other",
+  SeatClaimed = "seat_claimed",
+  QuestionAsked = "question_asked",
+  QuestionAnswered = "question_answered",
 }
 
 // ─── Tables ───
@@ -378,6 +385,14 @@ export const notifications = sqliteTable(
     // Who caused it: the buyer, the decider, the Student, the author.
     actorName: text("actor_name").notNull(),
     courseTitle: text("course_title").notNull(),
+    // Only for Question asked and Question answered.
+    lessonTitle: text("lesson_title"),
+    // Only on a decided Refund Request.
+    outcome: text("outcome").$type<
+      RefundStatus.Approved | RefundStatus.Declined
+    >(),
+    // The decision note, only on the buyer's decided Refund Request.
+    note: text("note"),
     // Stored as-is and opened as-is, even if the page no longer exists.
     href: text("href").notNull(),
     sentAt: text("sent_at").notNull(),

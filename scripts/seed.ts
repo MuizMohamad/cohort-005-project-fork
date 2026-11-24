@@ -104,7 +104,7 @@ async function seed() {
   }
 
   // ─── Users ───
-  // 1 admin, 3 instructors (one of whom owns no courses, so the empty
+  // 2 admins, 3 instructors (one of whom owns no courses, so the empty
   // instructor dashboard is reachable), and ~40 students.
   //
   // Students are split in two: the five named students below, who own all the
@@ -122,6 +122,19 @@ async function seed() {
       role: UserRole.Admin,
       avatarUrl: "https://api.dicebear.com/9.x/avataaars/svg?seed=alex",
       createdAt: daysAgo(120),
+    })
+    .returning()
+    .all();
+
+  // A second Platform Admin, so one can see the other's refund decisions.
+  const [secondAdmin] = db
+    .insert(schema.users)
+    .values({
+      name: "Sam Okafor",
+      email: "sam.okafor@ralph.dev",
+      role: UserRole.Admin,
+      avatarUrl: "https://api.dicebear.com/9.x/avataaars/svg?seed=sam",
+      createdAt: daysAgo(90),
     })
     .returning()
     .all();
@@ -268,7 +281,7 @@ async function seed() {
   const studentCount = allStudents.length;
 
   console.log(
-    `Created ${1 + instructorCount + studentCount} users (1 admin, ${instructorCount} instructors, ${studentCount} students).`
+    `Created ${2 + instructorCount + studentCount} users (2 admins, ${instructorCount} instructors, ${studentCount} students).`
   );
 
   // ─── Categories ───
@@ -2774,13 +2787,27 @@ This course is still in draft while the cluster examples are rewritten against t
       updatedAt: daysAgo(6),
     })
     .run();
+  // Sam declined Liam's first try, so Liam asked again with more detail.
+  const declinedNote =
+    "Could you tell us which course you meant to buy? Happy to look again once we know.";
   db.insert(schema.refunds)
-    .values({
-      purchaseId: liamPurchase.id,
-      status: RefundStatus.Open,
-      reason: "Bought the wrong one, I meant the advanced course.",
-      requestedAt: daysAgo(4),
-    })
+    .values([
+      {
+        purchaseId: liamPurchase.id,
+        status: RefundStatus.Declined,
+        reason: "Not for me.",
+        requestedAt: daysAgo(8),
+        decisionNote: declinedNote,
+        resolvedAt: daysAgo(7),
+        resolvedByUserId: secondAdmin.id,
+      },
+      {
+        purchaseId: liamPurchase.id,
+        status: RefundStatus.Open,
+        reason: "Bought the wrong one, I meant the advanced course.",
+        requestedAt: daysAgo(4),
+      },
+    ])
     .run();
 
   console.log("Created Liam's Refund Request.");
@@ -2825,6 +2852,205 @@ This course is still in draft while the cluster examples are rewritten against t
         sentAt: daysAgo(1),
         readAt: null,
       },
+    ])
+    .run();
+
+  // Sam's decline of Liam's first Refund Request: Liam hears the outcome and
+  // note, Alex hears who decided. Sam also has the two open requests unread.
+  db.insert(schema.notifications)
+    .values([
+      {
+        recipientId: liam.id,
+        kind: NotificationKind.RefundRequestDecided,
+        actorName: secondAdmin.name,
+        courseTitle: course1.title,
+        outcome: RefundStatus.Declined,
+        note: declinedNote,
+        href: `/courses/${course1.slug}`,
+        sentAt: daysAgo(7),
+        readAt: daysAgo(6),
+      },
+      {
+        recipientId: admin.id,
+        kind: NotificationKind.RefundRequestDecidedByOther,
+        actorName: secondAdmin.name,
+        courseTitle: course1.title,
+        outcome: RefundStatus.Declined,
+        href: "/admin/refunds",
+        sentAt: daysAgo(7),
+        readAt: null,
+      },
+      {
+        recipientId: secondAdmin.id,
+        kind: NotificationKind.RefundRequestRaised,
+        actorName: liam.name,
+        courseTitle: course1.title,
+        href: "/admin/refunds",
+        sentAt: daysAgo(4),
+        readAt: null,
+      },
+      {
+        recipientId: secondAdmin.id,
+        kind: NotificationKind.RefundRequestRaised,
+        actorName: marta.name,
+        courseTitle: course3.title,
+        href: "/admin/refunds",
+        sentAt: daysAgo(1),
+        readAt: null,
+      },
+    ])
+    .run();
+
+  // Bossy's inbox for the two Seats claimed on his Team Licence above:
+  // Olivia's already read, Liam's still unread.
+  db.insert(schema.notifications)
+    .values([
+      {
+        recipientId: bossy.id,
+        kind: NotificationKind.SeatClaimed,
+        actorName: studentByEmail("olivia.martinez@student.dev").name,
+        courseTitle: course2.title,
+        href: "/team",
+        sentAt: daysAgo(30),
+        readAt: daysAgo(29),
+      },
+      {
+        recipientId: bossy.id,
+        kind: NotificationKind.SeatClaimed,
+        actorName: liam.name,
+        courseTitle: course2.title,
+        href: "/team",
+        sentAt: daysAgo(25),
+        readAt: null,
+      },
+    ])
+    .run();
+
+  // The Instructors' and Students' inboxes for the lesson comments above: what
+  // posting each Question and Answer would have sent.
+
+  function lessonTitle(lessonId: number) {
+    return db
+      .select({ title: schema.lessons.title })
+      .from(schema.lessons)
+      .where(eq(schema.lessons.id, lessonId))
+      .get()!.title;
+  }
+
+  function questionAsked(
+    instructorId: number,
+    author: { name: string },
+    course: { title: string },
+    lessonId: number,
+    sentAt: string,
+    readAt: string | null
+  ) {
+    return {
+      recipientId: instructorId,
+      kind: NotificationKind.QuestionAsked,
+      actorName: author.name,
+      courseTitle: course.title,
+      lessonTitle: lessonTitle(lessonId),
+      href: "/instructor/questions",
+      sentAt,
+      readAt,
+    };
+  }
+
+  function questionAnswered(
+    recipientId: number,
+    answerer: { name: string },
+    course: { title: string; slug: string },
+    lessonId: number,
+    sentAt: string,
+    readAt: string | null
+  ) {
+    return {
+      recipientId,
+      kind: NotificationKind.QuestionAnswered,
+      actorName: answerer.name,
+      courseTitle: course.title,
+      lessonTitle: lessonTitle(lessonId),
+      href: `/courses/${course.slug}/lessons/${lessonId}`,
+      sentAt,
+      readAt,
+    };
+  }
+
+  db.insert(schema.notifications)
+    .values([
+      questionAsked(
+        instructor1.id,
+        students[0],
+        course1,
+        course1LessonIds[2],
+        daysAgo(30),
+        daysAgo(30)
+      ),
+      questionAnswered(
+        students[0].id,
+        instructor1,
+        course1,
+        course1LessonIds[2],
+        daysAgo(29),
+        daysAgo(29)
+      ),
+      questionAsked(
+        instructor1.id,
+        students[1],
+        course1,
+        course1LessonIds[3],
+        daysAgo(4),
+        daysAgo(3)
+      ),
+      questionAsked(
+        instructor1.id,
+        students[2],
+        course1,
+        course1LessonIds[7],
+        daysAgo(6),
+        null
+      ),
+      questionAsked(
+        instructor1.id,
+        students[4],
+        course1,
+        course1LessonIds[4],
+        daysAgo(1),
+        null
+      ),
+      questionAsked(
+        instructor2.id,
+        students[2],
+        course2,
+        course2LessonIds[0],
+        daysAgo(14),
+        daysAgo(13)
+      ),
+      questionAnswered(
+        students[2].id,
+        admin,
+        course2,
+        course2LessonIds[0],
+        daysAgo(13),
+        null
+      ),
+      questionAnswered(
+        instructor2.id,
+        admin,
+        course2,
+        course2LessonIds[0],
+        daysAgo(13),
+        null
+      ),
+      questionAsked(
+        instructor2.id,
+        students[3],
+        course2,
+        course2LessonIds[2],
+        daysAgo(9),
+        null
+      ),
     ])
     .run();
 

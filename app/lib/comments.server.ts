@@ -1,12 +1,24 @@
 import { eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "~/db/schema";
-import { comments, courses, lessons, modules } from "~/db/schema";
+import {
+  comments,
+  courses,
+  lessons,
+  modules,
+  users,
+  UserRole,
+} from "~/db/schema";
 import { MAX_COMMENT_LENGTH, MIN_COMMENT_LENGTH } from "~/lib/comments";
+import {
+  sendQuestionAnswered,
+  sendQuestionAsked,
+} from "~/lib/notifications.server";
 
 // ─── Comments ───
-// Posting a comment or reply on a lesson. Editing and deleting still live in
-// the lesson route.
+// Posting a comment or reply on a lesson, and telling the right people when it
+// is a Question or an Answer (see GLOSSARY.md). Editing and deleting still
+// live in the lesson route and send nothing.
 //
 // Every function takes the database first, so tests can hand in an in-memory
 // one. Uses positional parameters (project convention).
@@ -33,9 +45,23 @@ function getCommentById(db: Queryable, commentId: number) {
   return db.select().from(comments).where(eq(comments.id, commentId)).get();
 }
 
+function getUserById(db: Queryable, userId: number) {
+  return db.select().from(users).where(eq(users.id, userId)).get();
+}
+
+/** The course's Instructor and Platform Admins: their comments are never Questions. */
+function isStaff(user: { id: number; role: UserRole }, instructorId: number) {
+  return user.id === instructorId || user.role === UserRole.Admin;
+}
+
 function getCourseForLesson(db: Queryable, lessonId: number) {
   return db
-    .select({ courseId: courses.id, instructorId: courses.instructorId })
+    .select({
+      courseTitle: courses.title,
+      courseSlug: courses.slug,
+      instructorId: courses.instructorId,
+      lessonTitle: lessons.title,
+    })
     .from(lessons)
     .innerJoin(modules, eq(lessons.moduleId, modules.id))
     .innerJoin(courses, eq(modules.courseId, courses.id))
@@ -52,7 +78,8 @@ export function postComment(
   userId: number,
   lessonId: number,
   parentId: number | null,
-  body: string
+  body: string,
+  now: Date
 ) {
   const trimmed = checkCommentBody(body);
 
@@ -62,8 +89,8 @@ export function postComment(
       throw new Error("Lesson not found");
     }
 
+    const parent = parentId === null ? null : getCommentById(tx, parentId);
     if (parentId !== null) {
-      const parent = getCommentById(tx, parentId);
       if (!parent) {
         throw new Error("Parent comment not found");
       }
@@ -75,10 +102,51 @@ export function postComment(
       }
     }
 
-    return tx
+    const comment = tx
       .insert(comments)
       .values({ userId, lessonId, parentId, body: trimmed })
       .returning()
       .get();
+
+    const author = getUserById(tx, userId);
+    if (!author) {
+      throw new Error("User not found");
+    }
+    const authorIsStaff = isStaff(author, course.instructorId);
+
+    if (!parent) {
+      if (!authorIsStaff) {
+        sendQuestionAsked(
+          tx,
+          course.instructorId,
+          author.name,
+          course.courseTitle,
+          course.lessonTitle,
+          now
+        );
+      }
+      return comment;
+    }
+
+    const questionAuthor = getUserById(tx, parent.userId);
+    const isAnswer =
+      authorIsStaff &&
+      questionAuthor !== undefined &&
+      !isStaff(questionAuthor, course.instructorId);
+    if (isAnswer) {
+      sendQuestionAnswered(
+        tx,
+        userId === course.instructorId
+          ? [questionAuthor.id]
+          : [questionAuthor.id, course.instructorId],
+        author.name,
+        course.courseTitle,
+        course.lessonTitle,
+        `/courses/${course.courseSlug}/lessons/${lessonId}`,
+        now
+      );
+    }
+
+    return comment;
   });
 }

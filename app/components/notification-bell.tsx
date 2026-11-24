@@ -1,6 +1,18 @@
-import { Form } from "react-router";
+import { Form, useFetcher } from "react-router";
 import { useEffect, useRef, useState } from "react";
-import { Bell, Inbox as InboxIcon, Receipt, X } from "lucide-react";
+import {
+  Bell,
+  Check,
+  CheckCheck,
+  CircleCheck,
+  CircleX,
+  Inbox as InboxIcon,
+  MessageCircleQuestion,
+  MessageCircleReply,
+  Receipt,
+  UserPlus,
+  X,
+} from "lucide-react";
 import { cn } from "~/lib/utils";
 import {
   documentPage,
@@ -8,8 +20,12 @@ import {
   mergeInboxItems,
   startInboxPolling,
 } from "~/lib/inbox-polling";
-import { NotificationKind } from "~/db/schema";
-import type { InboxItem, InboxTab } from "~/lib/notifications.server";
+import { NotificationKind, RefundStatus } from "~/db/schema";
+import type {
+  InboxGroup,
+  InboxItem,
+  InboxTab,
+} from "~/lib/notifications.server";
 
 export interface Inbox {
   unreadCount: number;
@@ -17,10 +33,33 @@ export interface Inbox {
   all: InboxItem[];
 }
 
-function KindIcon({ kind }: { kind: NotificationKind }) {
+function KindIcon({
+  kind,
+  outcome,
+}: {
+  kind: NotificationKind;
+  outcome: InboxItem["outcome"];
+}) {
   switch (kind) {
     case NotificationKind.RefundRequestRaised:
       return <Receipt className="size-4 shrink-0 text-muted-foreground" />;
+    case NotificationKind.RefundRequestDecided:
+    case NotificationKind.RefundRequestDecidedByOther:
+      return outcome === RefundStatus.Approved ? (
+        <CircleCheck className="size-4 shrink-0 text-green-600" />
+      ) : (
+        <CircleX className="size-4 shrink-0 text-red-600" />
+      );
+    case NotificationKind.SeatClaimed:
+      return <UserPlus className="size-4 shrink-0 text-muted-foreground" />;
+    case NotificationKind.QuestionAsked:
+      return (
+        <MessageCircleQuestion className="size-4 shrink-0 text-muted-foreground" />
+      );
+    case NotificationKind.QuestionAnswered:
+      return (
+        <MessageCircleReply className="size-4 shrink-0 text-muted-foreground" />
+      );
   }
 }
 
@@ -38,6 +77,27 @@ function CountBadge({ count, className }: { count: number; className?: string })
   );
 }
 
+function MarkReadButton({ item }: { item: InboxItem }) {
+  const fetcher = useFetcher();
+  return (
+    <fetcher.Form
+      method="post"
+      action={`/api/notifications/${item.id}/read`}
+      className="absolute inset-y-0 right-3 hidden items-center group-hover:flex group-focus-within:flex"
+    >
+      <input type="hidden" name="intent" value="mark-read" />
+      <button
+        type="submit"
+        aria-label="Mark as read"
+        title="Mark as read"
+        className="rounded-md border bg-background p-1 text-muted-foreground shadow-sm hover:text-foreground"
+      >
+        <Check className="size-3.5" />
+      </button>
+    </fetcher.Form>
+  );
+}
+
 function NotificationRow({
   item,
   onOpen,
@@ -46,34 +106,97 @@ function NotificationRow({
   onOpen: () => void;
 }) {
   return (
-    <Form
+    <div className="group relative border-b">
+      <Form
+        method="post"
+        action={`/api/notifications/${item.id}/read`}
+        onSubmit={onOpen}
+      >
+        <button
+          type="submit"
+          className={cn(
+            "flex w-full items-center gap-3 px-5 py-3 text-left text-sm hover:bg-muted/60",
+            item.isRead
+              ? "text-muted-foreground"
+              : "bg-blue-50/60 font-medium dark:bg-blue-950/30"
+          )}
+        >
+          <KindIcon kind={item.kind} outcome={item.outcome} />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate">{item.text}</span>
+            {item.secondLine && (
+              <span className="truncate text-xs font-normal text-muted-foreground">
+                {item.secondLine}
+              </span>
+            )}
+          </span>
+          <span className="shrink-0 text-xs font-normal text-muted-foreground">
+            {item.timeAgo}
+          </span>
+          <span
+            aria-label={item.isRead ? undefined : "Unread"}
+            className={cn(
+              "size-2 shrink-0 rounded-full",
+              item.isRead ? "bg-transparent" : "bg-blue-600"
+            )}
+          />
+        </button>
+      </Form>
+      {!item.isRead && <MarkReadButton item={item} />}
+    </div>
+  );
+}
+
+const GROUP_HEADINGS: Record<InboxGroup, string> = {
+  today: "Today",
+  earlier: "Earlier",
+};
+
+function GroupedItems({
+  items,
+  onOpen,
+}: {
+  items: InboxItem[];
+  onOpen: () => void;
+}) {
+  return (["today", "earlier"] as const).map((group) => {
+    const inGroup = items.filter((item) => item.group === group);
+    if (inGroup.length === 0) return null;
+    return (
+      <section key={group}>
+        <h3 className="border-b bg-muted/40 px-5 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {GROUP_HEADINGS[group]}
+        </h3>
+        {inGroup.map((item) => (
+          <NotificationRow key={item.id} item={item} onOpen={onOpen} />
+        ))}
+      </section>
+    );
+  });
+}
+
+const EMPTY_MESSAGES: Record<InboxTab, string> = {
+  unread: "You're all caught up.",
+  all: "No notifications yet.",
+};
+
+function MarkAllReadButton({ newestShownId }: { newestShownId: number }) {
+  const fetcher = useFetcher();
+  return (
+    <fetcher.Form
       method="post"
-      action={`/api/notifications/${item.id}/read`}
-      onSubmit={onOpen}
+      action="/api/notifications/read-all"
+      className="ml-auto"
     >
+      <input type="hidden" name="upTo" value={newestShownId} />
       <button
         type="submit"
-        className={cn(
-          "flex w-full items-center gap-3 border-b px-5 py-3 text-left text-sm hover:bg-muted/60",
-          item.isRead
-            ? "text-muted-foreground"
-            : "bg-blue-50/60 font-medium dark:bg-blue-950/30"
-        )}
+        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
       >
-        <KindIcon kind={item.kind} />
-        <span className="min-w-0 flex-1 truncate">{item.text}</span>
-        <span className="shrink-0 text-xs font-normal text-muted-foreground">
-          {item.timeAgo}
-        </span>
-        <span
-          aria-label={item.isRead ? undefined : "Unread"}
-          className={cn(
-            "size-2 shrink-0 rounded-full",
-            item.isRead ? "bg-transparent" : "bg-blue-600"
-          )}
-        />
+        <CheckCheck className="size-3.5" />
+        Mark all as read
       </button>
-    </Form>
+    </fetcher.Form>
   );
 }
 
@@ -89,6 +212,8 @@ function NotificationPanel({
   onClose: () => void;
 }) {
   const items = tab === "unread" ? inbox.unread : inbox.all;
+  // All holds the newest items of every kind, so its first is the newest shown.
+  const newestShown = inbox.all[0];
 
   return (
     <>
@@ -121,17 +246,18 @@ function NotificationPanel({
               {t === "unread" && ` (${inbox.unreadCount})`}
             </button>
           ))}
+          {inbox.unreadCount > 0 && newestShown && (
+            <MarkAllReadButton newestShownId={newestShown.id} />
+          )}
         </div>
         <div className="flex-1 overflow-y-auto">
           {items.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-6 py-12 text-center text-sm text-muted-foreground">
               <InboxIcon className="size-8 opacity-40" />
-              Nothing here yet.
+              {EMPTY_MESSAGES[tab]}
             </div>
           ) : (
-            items.map((item) => (
-              <NotificationRow key={item.id} item={item} onOpen={onClose} />
-            ))
+            <GroupedItems items={items} onOpen={onClose} />
           )}
         </div>
       </aside>

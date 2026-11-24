@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
-import { coupons, enrollments, purchases } from "~/db/schema";
+import { coupons, courses, enrollments, purchases, users } from "~/db/schema";
+import { sendSeatClaimed } from "~/lib/notifications.server";
 import { getSeatAvailability, type Db } from "~/lib/refunds.server";
 
 // ─── Seats ───
@@ -20,7 +21,8 @@ export type ClaimResult =
 
 /**
  * Claims the Seat with this code for a Student, enrolling them in its course.
- * The Seat claim and the Enrollment are saved together or not at all.
+ * The Seat claim, the Enrollment and the Team Admin's notification are saved
+ * together or not at all.
  */
 export function claimSeat(
   db: Db,
@@ -86,6 +88,29 @@ export function claimSeat(
       .values({ userId: studentId, courseId: seat.courseId })
       .returning()
       .get();
+
+    if (purchase) {
+      const student = tx
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, studentId))
+        .get();
+      const course = tx
+        .select({ title: courses.title })
+        .from(courses)
+        .where(eq(courses.id, seat.courseId))
+        .get();
+      if (student && course) {
+        sendSeatClaimed(
+          tx,
+          purchase.userId,
+          studentId,
+          student.name,
+          course.title,
+          now
+        );
+      }
+    }
 
     return { ok: true, enrollment };
   });

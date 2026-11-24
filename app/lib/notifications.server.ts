@@ -1,7 +1,13 @@
-import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "~/db/schema";
-import { notifications, users, NotificationKind, UserRole } from "~/db/schema";
+import {
+  notifications,
+  users,
+  NotificationKind,
+  RefundStatus,
+  UserRole,
+} from "~/db/schema";
 
 // ─── Notifications ───
 // Each person's in-app inbox. A send function per kind works out who gets it
@@ -55,13 +61,152 @@ export function sendRefundRequestRaised(
     .run();
 }
 
+/**
+ * The buyer hears the outcome of their Refund Request, with the decision note,
+ * and every other Platform Admin hears who decided it. The decider hears
+ * nothing, and a buyer who is also a Platform Admin gets only the buyer item.
+ */
+export function sendRefundRequestDecided(
+  db: Queryable,
+  buyerId: number,
+  deciderId: number,
+  deciderName: string,
+  courseTitle: string,
+  courseSlug: string,
+  outcome: RefundStatus.Approved | RefundStatus.Declined,
+  note: string | null,
+  now: Date
+) {
+  const sentAt = now.toISOString();
+  const forBuyer = {
+    recipientId: buyerId,
+    kind: NotificationKind.RefundRequestDecided,
+    actorName: deciderName,
+    courseTitle,
+    outcome,
+    note,
+    href: `/courses/${courseSlug}`,
+    sentAt,
+  };
+  const forOtherAdmins = platformAdminIdsExcept(db, deciderId)
+    .filter((recipientId) => recipientId !== buyerId)
+    .map((recipientId) => ({
+      recipientId,
+      kind: NotificationKind.RefundRequestDecidedByOther,
+      actorName: deciderName,
+      courseTitle,
+      outcome,
+      href: "/admin/refunds",
+      sentAt,
+    }));
+
+  const rows = buyerId === deciderId ? forOtherAdmins : [forBuyer, ...forOtherAdmins];
+  if (rows.length === 0) return;
+
+  db.insert(notifications).values(rows).run();
+}
+
+/**
+ * The Team Admin who bought the Team Licence hears about each Seat claimed,
+ * unless they claimed it themselves.
+ */
+export function sendSeatClaimed(
+  db: Queryable,
+  teamAdminId: number,
+  studentId: number,
+  studentName: string,
+  courseTitle: string,
+  now: Date
+) {
+  if (teamAdminId === studentId) return;
+
+  db.insert(notifications)
+    .values({
+      recipientId: teamAdminId,
+      kind: NotificationKind.SeatClaimed,
+      actorName: studentName,
+      courseTitle,
+      href: "/team",
+      sentAt: now.toISOString(),
+    })
+    .run();
+}
+
+/** The course's Instructor hears about a new Question, never its text. */
+export function sendQuestionAsked(
+  db: Queryable,
+  instructorId: number,
+  authorName: string,
+  courseTitle: string,
+  lessonTitle: string,
+  now: Date
+) {
+  db.insert(notifications)
+    .values({
+      recipientId: instructorId,
+      kind: NotificationKind.QuestionAsked,
+      actorName: authorName,
+      courseTitle,
+      lessonTitle,
+      href: "/instructor/questions",
+      sentAt: now.toISOString(),
+    })
+    .run();
+}
+
+/**
+ * The Question's author hears about an Answer, plus the Instructor when a
+ * Platform Admin wrote it. The caller picks them; never the Answer's text.
+ */
+export function sendQuestionAnswered(
+  db: Queryable,
+  recipientIds: number[],
+  answererName: string,
+  courseTitle: string,
+  lessonTitle: string,
+  href: string,
+  now: Date
+) {
+  if (recipientIds.length === 0) return;
+
+  db.insert(notifications)
+    .values(
+      recipientIds.map((recipientId) => ({
+        recipientId,
+        kind: NotificationKind.QuestionAnswered,
+        actorName: answererName,
+        courseTitle,
+        lessonTitle,
+        href,
+        sentAt: now.toISOString(),
+      }))
+    )
+    .run();
+}
+
 // ─── Showing ───
 
 function textOf(notification: Notification): string {
   switch (notification.kind) {
     case NotificationKind.RefundRequestRaised:
       return `${notification.actorName} asked for a refund on ${notification.courseTitle}`;
+    case NotificationKind.RefundRequestDecided:
+      return `Your refund on ${notification.courseTitle} was ${notification.outcome}`;
+    case NotificationKind.RefundRequestDecidedByOther:
+      return `${notification.actorName} ${notification.outcome} the refund on ${notification.courseTitle}`;
+    case NotificationKind.SeatClaimed:
+      return `${notification.actorName} claimed a seat on ${notification.courseTitle}`;
+    case NotificationKind.QuestionAsked:
+      return `${notification.actorName} asked a question on ${notification.lessonTitle} in ${notification.courseTitle}`;
+    case NotificationKind.QuestionAnswered:
+      return `${notification.actorName} answered a question on ${notification.lessonTitle} in ${notification.courseTitle}`;
   }
+}
+
+function secondLineOf(notification: Notification): string | null {
+  return notification.kind === NotificationKind.RefundRequestDecided
+    ? notification.note
+    : null;
 }
 
 function timeAgo(sentAtIso: string, now: Date): string {
@@ -74,15 +219,27 @@ function timeAgo(sentAtIso: string, now: Date): string {
   return `${Math.floor(minutes / (60 * 24))}d ago`;
 }
 
+export type InboxGroup = "today" | "earlier";
+
+function groupOf(sentAtIso: string, now: Date): InboxGroup {
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  return new Date(sentAtIso) >= midnight ? "today" : "earlier";
+}
+
 export type InboxTab = "unread" | "all";
 
 export type InboxItem = {
   id: number;
   kind: NotificationKind;
   text: string;
+  // Shown small and grey under the text, cut off if long.
+  secondLine: string | null;
+  outcome: RefundStatus.Approved | RefundStatus.Declined | null;
   href: string;
   sentAt: string;
   timeAgo: string;
+  group: InboxGroup;
   isRead: boolean;
 };
 
@@ -113,9 +270,12 @@ export function listInbox(
     id: row.id,
     kind: row.kind,
     text: textOf(row),
+    secondLine: secondLineOf(row),
+    outcome: row.outcome,
     href: row.href,
     sentAt: row.sentAt,
     timeAgo: timeAgo(row.sentAt, now),
+    group: groupOf(row.sentAt, now),
     isRead: row.readAt !== null,
   }));
 }
@@ -170,6 +330,47 @@ export function markRead(
   return { href: notification.href };
 }
 
+/**
+ * Marks the person's unread items read, up to and including the newest one
+ * their panel was showing. Anything sent after it stays unread, because they
+ * haven't seen it yet. Does nothing when that item isn't theirs.
+ */
+export function markAllReadUpTo(
+  db: Queryable,
+  userId: number,
+  newestShownId: number,
+  now: Date
+) {
+  const newestShown = db
+    .select()
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.id, newestShownId),
+        eq(notifications.recipientId, userId)
+      )
+    )
+    .get();
+  if (!newestShown) return;
+
+  db.update(notifications)
+    .set({ readAt: now.toISOString() })
+    .where(
+      and(
+        eq(notifications.recipientId, userId),
+        isNull(notifications.readAt),
+        or(
+          lt(notifications.sentAt, newestShown.sentAt),
+          and(
+            eq(notifications.sentAt, newestShown.sentAt),
+            lte(notifications.id, newestShown.id)
+          )
+        )
+      )
+    )
+    .run();
+}
+
 export function countUnread(db: Queryable, userId: number): number {
   const result = db
     .select({ count: sql<number>`count(*)` })
@@ -180,4 +381,16 @@ export function countUnread(db: Queryable, userId: number): number {
     .get();
 
   return result?.count ?? 0;
+}
+
+// ─── Clean-up ───
+
+const KEEP_DAYS = 90;
+
+/** Removes every notification sent more than 90 days before now, read or not. */
+export function deleteOldNotifications(db: Db, now: Date) {
+  const cutoff = new Date(now.getTime() - KEEP_DAYS * 24 * 60 * 60_000);
+  db.delete(notifications)
+    .where(lt(notifications.sentAt, cutoff.toISOString()))
+    .run();
 }

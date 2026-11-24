@@ -24,5 +24,11 @@ export async function action({ params, request }: Route.ActionArgs) {
     throw data("Notification not found.", { status: 404 });
   }
 
+  // The hover "mark as read" button clears an item without opening it.
+  const formData = await request.formData();
+  if (formData.get("intent") === "mark-read") {
+    return { ok: true };
+  }
+
   return redirect(opened.href);
 }

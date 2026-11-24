@@ -146,9 +146,12 @@ function item(id: number, overrides: Partial<InboxItem> = {}): InboxItem {
     id,
     kind: NotificationKind.RefundRequestRaised,
     text: `Item ${id}`,
+    secondLine: null,
+    outcome: null,
     href: "/admin/refunds",
     sentAt: "2026-10-06T12:00:00.000Z",
     timeAgo: "just now",
+    group: "today",
     isRead: false,
     ...overrides,
   };
