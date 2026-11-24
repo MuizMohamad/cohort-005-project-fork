@@ -4,6 +4,7 @@ import * as schema from "~/db/schema";
 import { UserRole } from "~/db/schema";
 import { approveRefundRequest, raiseRefundRequest } from "./refunds.server";
 import { claimSeat } from "./seats.server";
+import { countUnread, listInbox } from "./notifications.server";
 
 type TestDb = ReturnType<typeof createTestDb>;
 
@@ -84,22 +85,26 @@ describe("claimSeat", () => {
   it("refuses a Seat someone has already claimed", () => {
     const seat = buySeat();
     claimSeat(db, seat.code, addUser("Sam").id, "AU", NOW);
+    const unreadBefore = countUnread(db, teamAdmin.id);
 
     expect(claimSeat(db, seat.code, addUser("Kim").id, "AU", NOW)).toEqual({
       ok: false,
       error: "Coupon has already been redeemed",
     });
+    expect(countUnread(db, teamAdmin.id)).toBe(unreadBefore);
   });
 
   it("refuses a Seat on hold while its Team Licence has an Open Refund Request", () => {
     const seat = buySeat();
     raiseRefundRequest(db, seat.purchaseId, teamAdmin.id, "Not needed", NOW);
+    const unreadBefore = countUnread(db, teamAdmin.id);
 
     expect(claimSeat(db, seat.code, addUser("Sam").id, "AU", NOW)).toEqual({
       ok: false,
       error:
         "This seat can't be claimed right now. Ask the person who shared it with you.",
     });
+    expect(countUnread(db, teamAdmin.id)).toBe(unreadBefore);
   });
 
   it("refuses a Seat whose Team Licence was refunded", () => {
@@ -118,23 +123,27 @@ describe("claimSeat", () => {
       .returning()
       .get();
     approveRefundRequest(db, raised.refundRequestId, platformAdmin.id, null, NOW);
+    const unreadBefore = countUnread(db, teamAdmin.id);
 
     expect(claimSeat(db, seat.code, addUser("Sam").id, "AU", NOW)).toEqual({
       ok: false,
       error:
         "This seat is no longer available. Ask the person who shared it with you.",
     });
+    expect(countUnread(db, teamAdmin.id)).toBe(unreadBefore);
   });
 
   it("refuses a Student already enrolled in the course and leaves the Seat unclaimed", () => {
     const student = addUser("Sam");
     claimSeat(db, buySeat().code, student.id, "AU", NOW);
     const secondSeat = buySeat();
+    const unreadBefore = countUnread(db, teamAdmin.id);
 
     expect(claimSeat(db, secondSeat.code, student.id, "AU", NOW)).toEqual({
       ok: false,
       error: "You are already enrolled in this course",
     });
+    expect(countUnread(db, teamAdmin.id)).toBe(unreadBefore);
     expect(
       claimSeat(db, secondSeat.code, addUser("Kim").id, "AU", NOW).ok
     ).toBe(true);
@@ -148,6 +157,7 @@ describe("claimSeat", () => {
       error:
         "This coupon can only be redeemed from the same country as the purchaser",
     });
+    expect(countUnread(db, teamAdmin.id)).toBe(0);
   });
 
   it("lets a Student anywhere claim a Seat bought with no country", () => {
@@ -156,5 +166,35 @@ describe("claimSeat", () => {
     expect(claimSeat(db, seat.code, addUser("Sam").id, "NZ", NOW).ok).toBe(
       true
     );
+  });
+});
+
+describe("claimSeat notifications", () => {
+  it("tells the Team Admin who bought the Team Licence which Student claimed it", () => {
+    const seat = buySeat();
+    const student = addUser("Sam");
+
+    claimSeat(db, seat.code, student.id, "AU", NOW);
+
+    expect(listInbox(db, teamAdmin.id, "unread", NOW)).toEqual([
+      expect.objectContaining({
+        text: `Sam claimed a seat on ${base.course.title}`,
+        href: "/team",
+      }),
+    ]);
+  });
+
+  it("sends one notification per Seat claimed", () => {
+    for (const name of ["Ann", "Ben", "Cat", "Dan", "Eve"]) {
+      claimSeat(db, buySeat().code, addUser(name).id, "AU", NOW);
+    }
+
+    expect(countUnread(db, teamAdmin.id)).toBe(5);
+  });
+
+  it("tells a Team Admin nothing when they claim a Seat on their own Team Licence", () => {
+    claimSeat(db, buySeat().code, teamAdmin.id, "AU", NOW);
+
+    expect(countUnread(db, teamAdmin.id)).toBe(0);
   });
 });

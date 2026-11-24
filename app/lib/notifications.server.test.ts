@@ -4,7 +4,9 @@ import * as schema from "~/db/schema";
 import { UserRole } from "~/db/schema";
 import {
   countUnread,
+  deleteOldNotifications,
   listInbox,
+  markAllReadUpTo,
   markRead,
   sendRefundRequestRaised,
 } from "./notifications.server";
@@ -87,6 +89,16 @@ describe("listing the inbox", () => {
     ).toEqual(["just now", "8m ago", "5h ago", "3d ago"]);
   });
 
+  it("puts items sent since midnight in Today and the rest in Earlier", () => {
+    raised("Last Night", 12 * 60 + 1);
+    raised("Just After Midnight", 11 * 60 + 59);
+    raised("This Morning", 60);
+
+    expect(
+      listInbox(db, platformAdmin.id, "all", NOW).map((item) => item.group)
+    ).toEqual(["today", "today", "earlier"]);
+  });
+
   it("keeps the names it was sent with after a rename", () => {
     raised("Intro to SQL");
     db.update(schema.users).set({ name: "Samantha" }).run();
@@ -133,6 +145,53 @@ describe("marking one read", () => {
   });
 });
 
+describe("marking all read up to an item", () => {
+  it("marks that item and everything older, leaving anything newer unread", () => {
+    raised("Oldest Course", 30);
+    raised("Shown Course", 20);
+    const [newestShown] = listInbox(db, platformAdmin.id, "all", NOW);
+    raised("Newer Course", 5);
+
+    markAllReadUpTo(db, platformAdmin.id, newestShown.id, NOW);
+
+    expect(
+      listInbox(db, platformAdmin.id, "unread", NOW).map((item) => item.text)
+    ).toEqual(["Sam asked for a refund on Newer Course"]);
+  });
+
+  it("goes by when items were sent, not the order they were saved", () => {
+    raised("Shown Course", 20);
+    const [newestShown] = listInbox(db, platformAdmin.id, "all", NOW);
+    raised("Late-saved Older Course", 40);
+
+    markAllReadUpTo(db, platformAdmin.id, newestShown.id, NOW);
+
+    expect(countUnread(db, platformAdmin.id)).toBe(0);
+  });
+
+  it("leaves another person's notifications alone", () => {
+    const otherAdmin = addUser("Quinn", UserRole.Admin);
+    raised("Intro to SQL", 10);
+    const [newestShown] = listInbox(db, platformAdmin.id, "all", NOW);
+
+    markAllReadUpTo(db, platformAdmin.id, newestShown.id, NOW);
+
+    expect(countUnread(db, platformAdmin.id)).toBe(0);
+    expect(countUnread(db, otherAdmin.id)).toBe(1);
+  });
+
+  it("does nothing when the item isn't theirs", () => {
+    const otherAdmin = addUser("Quinn", UserRole.Admin);
+    raised("Intro to SQL", 10);
+    const [theirs] = listInbox(db, otherAdmin.id, "all", NOW);
+
+    markAllReadUpTo(db, platformAdmin.id, theirs.id, NOW);
+
+    expect(countUnread(db, platformAdmin.id)).toBe(1);
+    expect(countUnread(db, otherAdmin.id)).toBe(1);
+  });
+});
+
 describe("counting unread", () => {
   it("gives the true count, even above 99", () => {
     for (let i = 0; i < 120; i++) raised("Intro to SQL", i);
@@ -144,5 +203,35 @@ describe("counting unread", () => {
     raised("Intro to SQL");
 
     expect(countUnread(db, buyer.id)).toBe(0);
+  });
+});
+
+describe("deleting old notifications", () => {
+  const NINETY_DAYS_IN_MINUTES = 90 * 24 * 60;
+
+  it("deletes items sent more than 90 days ago and keeps the rest", () => {
+    raised("Too Old", NINETY_DAYS_IN_MINUTES + 1);
+    raised("Exactly 90 Days", NINETY_DAYS_IN_MINUTES);
+    raised("Recent", 5);
+
+    deleteOldNotifications(db, NOW);
+
+    expect(
+      listInbox(db, platformAdmin.id, "all", NOW).map((item) => item.text)
+    ).toEqual([
+      "Sam asked for a refund on Recent",
+      "Sam asked for a refund on Exactly 90 Days",
+    ]);
+  });
+
+  it("deletes old items whether they were read or not", () => {
+    raised("Old Read", NINETY_DAYS_IN_MINUTES + 10);
+    raised("Old Unread", NINETY_DAYS_IN_MINUTES + 5);
+    const oldRead = listInbox(db, platformAdmin.id, "all", NOW)[1];
+    markRead(db, platformAdmin.id, oldRead.id, NOW);
+
+    deleteOldNotifications(db, NOW);
+
+    expect(listInbox(db, platformAdmin.id, "all", NOW)).toEqual([]);
   });
 });

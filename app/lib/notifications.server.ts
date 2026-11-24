@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "~/db/schema";
 import {
@@ -106,6 +106,32 @@ export function sendRefundRequestDecided(
   db.insert(notifications).values(rows).run();
 }
 
+/**
+ * The Team Admin who bought the Team Licence hears about each Seat claimed,
+ * unless they claimed it themselves.
+ */
+export function sendSeatClaimed(
+  db: Queryable,
+  teamAdminId: number,
+  studentId: number,
+  studentName: string,
+  courseTitle: string,
+  now: Date
+) {
+  if (teamAdminId === studentId) return;
+
+  db.insert(notifications)
+    .values({
+      recipientId: teamAdminId,
+      kind: NotificationKind.SeatClaimed,
+      actorName: studentName,
+      courseTitle,
+      href: "/team",
+      sentAt: now.toISOString(),
+    })
+    .run();
+}
+
 // ─── Showing ───
 
 function textOf(notification: Notification): string {
@@ -116,6 +142,8 @@ function textOf(notification: Notification): string {
       return `Your refund on ${notification.courseTitle} was ${notification.outcome}`;
     case NotificationKind.RefundRequestDecidedByOther:
       return `${notification.actorName} ${notification.outcome} the refund on ${notification.courseTitle}`;
+    case NotificationKind.SeatClaimed:
+      return `${notification.actorName} claimed a seat on ${notification.courseTitle}`;
   }
 }
 
@@ -135,6 +163,14 @@ function timeAgo(sentAtIso: string, now: Date): string {
   return `${Math.floor(minutes / (60 * 24))}d ago`;
 }
 
+export type InboxGroup = "today" | "earlier";
+
+function groupOf(sentAtIso: string, now: Date): InboxGroup {
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  return new Date(sentAtIso) >= midnight ? "today" : "earlier";
+}
+
 export type InboxTab = "unread" | "all";
 
 export type InboxItem = {
@@ -147,6 +183,7 @@ export type InboxItem = {
   href: string;
   sentAt: string;
   timeAgo: string;
+  group: InboxGroup;
   isRead: boolean;
 };
 
@@ -182,6 +219,7 @@ export function listInbox(
     href: row.href,
     sentAt: row.sentAt,
     timeAgo: timeAgo(row.sentAt, now),
+    group: groupOf(row.sentAt, now),
     isRead: row.readAt !== null,
   }));
 }
@@ -213,6 +251,47 @@ export function markRead(
   return { href: notification.href };
 }
 
+/**
+ * Marks the person's unread items read, up to and including the newest one
+ * their panel was showing. Anything sent after it stays unread, because they
+ * haven't seen it yet. Does nothing when that item isn't theirs.
+ */
+export function markAllReadUpTo(
+  db: Queryable,
+  userId: number,
+  newestShownId: number,
+  now: Date
+) {
+  const newestShown = db
+    .select()
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.id, newestShownId),
+        eq(notifications.recipientId, userId)
+      )
+    )
+    .get();
+  if (!newestShown) return;
+
+  db.update(notifications)
+    .set({ readAt: now.toISOString() })
+    .where(
+      and(
+        eq(notifications.recipientId, userId),
+        isNull(notifications.readAt),
+        or(
+          lt(notifications.sentAt, newestShown.sentAt),
+          and(
+            eq(notifications.sentAt, newestShown.sentAt),
+            lte(notifications.id, newestShown.id)
+          )
+        )
+      )
+    )
+    .run();
+}
+
 export function countUnread(db: Queryable, userId: number): number {
   const result = db
     .select({ count: sql<number>`count(*)` })
@@ -223,4 +302,16 @@ export function countUnread(db: Queryable, userId: number): number {
     .get();
 
   return result?.count ?? 0;
+}
+
+// ─── Clean-up ───
+
+const KEEP_DAYS = 90;
+
+/** Removes every notification sent more than 90 days before now, read or not. */
+export function deleteOldNotifications(db: Db, now: Date) {
+  const cutoff = new Date(now.getTime() - KEEP_DAYS * 24 * 60 * 60_000);
+  db.delete(notifications)
+    .where(lt(notifications.sentAt, cutoff.toISOString()))
+    .run();
 }

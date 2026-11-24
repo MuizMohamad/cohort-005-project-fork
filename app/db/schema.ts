@@ -48,6 +48,7 @@ export enum NotificationKind {
   // other Platform Admins, so each side has its own kind.
   RefundRequestDecided = "refund_request_decided",
   RefundRequestDecidedByOther = "refund_request_decided_by_other",
+  SeatClaimed = "seat_claimed",
 }
 
 // ─── Tables ───
