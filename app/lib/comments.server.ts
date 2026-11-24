@@ -136,7 +136,9 @@ export function postComment(
     if (isAnswer) {
       sendQuestionAnswered(
         tx,
-        [questionAuthor.id],
+        userId === course.instructorId
+          ? [questionAuthor.id]
+          : [questionAuthor.id, course.instructorId],
         author.name,
         course.courseTitle,
         course.lessonTitle,

@@ -77,7 +77,10 @@ export function sendQuestionAsked(
     .run();
 }
 
-/** Who an Answer is for is worked out by the caller; never its text. */
+/**
+ * The Question's author hears about an Answer, plus the Instructor when a
+ * Platform Admin wrote it. The caller picks them; never the Answer's text.
+ */
 export function sendQuestionAnswered(
   db: Queryable,
   recipientIds: number[],

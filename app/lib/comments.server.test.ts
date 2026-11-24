@@ -230,5 +230,26 @@ describe("postComment", () => {
       expect(inbox(base.instructor.id)).toHaveLength(1);
       expect(inbox(platformAdmin.id)).toEqual([]);
     });
+
+    it("tells the author and the Instructor when a Platform Admin answers", () => {
+      const question = postComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "Why?",
+        NOW
+      );
+
+      postComment(db, platformAdmin.id, lessonId, question.id, "Hi!", NOW);
+
+      const answered = {
+        text: "Pat Admin answered a question on Lesson 1 in Test Course",
+        href: `/courses/test-course/lessons/${lessonId}`,
+      };
+      expect(inbox(base.user.id)).toEqual([answered]);
+      expect(inbox(base.instructor.id)).toContainEqual(answered);
+      expect(inbox(platformAdmin.id)).toEqual([]);
+    });
   });
 });
