@@ -277,24 +277,6 @@ function secondLineOf(notification: Notification): string | null {
     : null;
 }
 
-function timeAgo(sentAtIso: string, now: Date): string {
-  const minutes = Math.floor(
-    (now.getTime() - new Date(sentAtIso).getTime()) / 60_000
-  );
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  if (minutes < 60 * 24) return `${Math.floor(minutes / 60)}h ago`;
-  return `${Math.floor(minutes / (60 * 24))}d ago`;
-}
-
-export type InboxGroup = "today" | "earlier";
-
-function groupOf(sentAtIso: string, now: Date): InboxGroup {
-  const midnight = new Date(now);
-  midnight.setHours(0, 0, 0, 0);
-  return new Date(sentAtIso) >= midnight ? "today" : "earlier";
-}
-
 export type InboxTab = "unread" | "all";
 
 export type InboxItem = {
@@ -305,9 +287,8 @@ export type InboxItem = {
   secondLine: string | null;
   outcome: RefundDecision | null;
   href: string;
+  // The browser groups and dates items from this, in the viewer's time zone.
   sentAt: string;
-  timeAgo: string;
-  group: InboxGroup;
   isRead: boolean;
 };
 
@@ -320,8 +301,7 @@ const ALL_TAB_LIMIT = 50;
 export function listInbox(
   db: Queryable,
   userId: number,
-  tab: InboxTab,
-  now: Date
+  tab: InboxTab
 ): InboxItem[] {
   const query = db
     .select()
@@ -342,8 +322,6 @@ export function listInbox(
     outcome: row.outcome,
     href: row.href,
     sentAt: row.sentAt,
-    timeAgo: timeAgo(row.sentAt, now),
-    group: groupOf(row.sentAt, now),
     isRead: row.readAt !== null,
   }));
 }
@@ -361,13 +339,12 @@ export type InboxCheck = {
 export function checkInbox(
   db: Queryable,
   userId: number,
-  tab: InboxTab | null,
-  now: Date
+  tab: InboxTab | null
 ): InboxCheck {
   return {
     unreadCount: countUnread(db, userId),
     tab,
-    items: tab ? listInbox(db, userId, tab, now) : null,
+    items: tab ? listInbox(db, userId, tab) : null,
   };
 }
 

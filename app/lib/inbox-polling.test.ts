@@ -151,8 +151,6 @@ function item(id: number, overrides: Partial<InboxItem> = {}): InboxItem {
     outcome: null,
     href: "/admin/refunds",
     sentAt: "2026-10-06T12:00:00.000Z",
-    timeAgo: "just now",
-    group: "today",
     isRead: false,
     ...overrides,
   };
@@ -196,13 +194,13 @@ describe("merging a check into the list showing", () => {
   });
 
   it("refreshes the details of items already showing", () => {
-    const showing = [item(2, { timeAgo: "just now" }), item(1)];
+    const showing = [item(2), item(1)];
 
     const merged = mergeInboxItems(showing, [
-      item(2, { timeAgo: "1m ago", isRead: true }),
+      item(2, { isRead: true }),
       item(1),
     ]);
 
-    expect(merged[0]).toMatchObject({ id: 2, timeAgo: "1m ago", isRead: true });
+    expect(merged[0]).toMatchObject({ id: 2, isRead: true });
   });
 });

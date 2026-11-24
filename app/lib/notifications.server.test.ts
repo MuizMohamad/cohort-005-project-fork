@@ -80,7 +80,7 @@ describe("listing the inbox", () => {
     raised("Middle Course", 10);
 
     expect(
-      listInbox(db, platformAdmin.id, "all", NOW).map((item) => item.text)
+      listInbox(db, platformAdmin.id, "all").map((item) => item.text)
     ).toEqual([
       "Sam asked for a refund on New Course",
       "Sam asked for a refund on Middle Course",
@@ -91,7 +91,7 @@ describe("listing the inbox", () => {
   it("shows only the newest 50 on the All tab", () => {
     for (let i = 60; i >= 1; i--) raised(`Course ${i}`, i);
 
-    const all = listInbox(db, platformAdmin.id, "all", NOW);
+    const all = listInbox(db, platformAdmin.id, "all");
 
     expect(all).toHaveLength(50);
     expect(all[0].text).toBe("Sam asked for a refund on Course 1");
@@ -101,35 +101,14 @@ describe("listing the inbox", () => {
   it("shows every unread item on the Unread tab, even past 50", () => {
     for (let i = 60; i >= 1; i--) raised(`Course ${i}`, i);
 
-    expect(listInbox(db, platformAdmin.id, "unread", NOW)).toHaveLength(60);
-  });
-
-  it("gives each item a short time since it was sent", () => {
-    raised("A", 3 * 24 * 60 + 5);
-    raised("B", 5 * 60 + 59);
-    raised("C", 8);
-    raised("D", 0);
-
-    expect(
-      listInbox(db, platformAdmin.id, "all", NOW).map((item) => item.timeAgo)
-    ).toEqual(["just now", "8m ago", "5h ago", "3d ago"]);
-  });
-
-  it("puts items sent since midnight in Today and the rest in Earlier", () => {
-    raised("Last Night", 12 * 60 + 1);
-    raised("Just After Midnight", 11 * 60 + 59);
-    raised("This Morning", 60);
-
-    expect(
-      listInbox(db, platformAdmin.id, "all", NOW).map((item) => item.group)
-    ).toEqual(["today", "today", "earlier"]);
+    expect(listInbox(db, platformAdmin.id, "unread")).toHaveLength(60);
   });
 
   it("keeps the names it was sent with after a rename", () => {
     raised("Intro to SQL");
     db.update(schema.users).set({ name: "Samantha" }).run();
 
-    expect(listInbox(db, platformAdmin.id, "all", NOW)[0].text).toBe(
+    expect(listInbox(db, platformAdmin.id, "all")[0].text).toBe(
       "Sam asked for a refund on Intro to SQL"
     );
   });
@@ -141,7 +120,7 @@ describe("listing the inbox", () => {
       .where(eq(schema.courses.title, "Intro to SQL"))
       .run();
 
-    expect(listInbox(db, platformAdmin.id, "all", NOW)[0].text).toBe(
+    expect(listInbox(db, platformAdmin.id, "all")[0].text).toBe(
       "Sam asked for a refund on Intro to SQL"
     );
   });
@@ -161,7 +140,7 @@ describe("listing the inbox", () => {
 
     db.delete(schema.lessons).where(eq(schema.lessons.id, lesson.id)).run();
 
-    expect(listInbox(db, base.instructor.id, "all", NOW)[0].text).toBe(
+    expect(listInbox(db, base.instructor.id, "all")[0].text).toBe(
       "Sam asked a question on Joins in Test Course"
     );
   });
@@ -172,7 +151,7 @@ describe("checking the inbox", () => {
     raised("Intro to SQL");
     raised("Advanced SQL");
 
-    expect(checkInbox(db, platformAdmin.id, null, NOW)).toEqual({
+    expect(checkInbox(db, platformAdmin.id, null)).toEqual({
       unreadCount: 2,
       tab: null,
       items: null,
@@ -182,10 +161,10 @@ describe("checking the inbox", () => {
   it("adds the asked-for tab of the inbox", () => {
     raised("Intro to SQL", 10);
     raised("Advanced SQL", 5);
-    const [newest] = listInbox(db, platformAdmin.id, "unread", NOW);
+    const [newest] = listInbox(db, platformAdmin.id, "unread");
     markRead(db, platformAdmin.id, newest.id, NOW);
 
-    const check = checkInbox(db, platformAdmin.id, "unread", NOW);
+    const check = checkInbox(db, platformAdmin.id, "unread");
 
     expect(check.unreadCount).toBe(1);
     expect(check.tab).toBe("unread");
@@ -197,7 +176,7 @@ describe("checking the inbox", () => {
   it("only gives that person's own inbox", () => {
     raised("Intro to SQL");
 
-    expect(checkInbox(db, buyer.id, "all", NOW)).toEqual({
+    expect(checkInbox(db, buyer.id, "all")).toEqual({
       unreadCount: 0,
       tab: "all",
       items: [],
@@ -209,21 +188,21 @@ describe("marking one read", () => {
   it("marks only that item and hands back the page it opens", () => {
     raised("First Course", 10);
     raised("Second Course", 5);
-    const [newest] = listInbox(db, platformAdmin.id, "unread", NOW);
+    const [newest] = listInbox(db, platformAdmin.id, "unread");
 
     const opened = markRead(db, platformAdmin.id, newest.id, NOW);
 
     expect(opened).toEqual({ href: "/admin/refunds" });
     expect(countUnread(db, platformAdmin.id)).toBe(1);
     expect(
-      listInbox(db, platformAdmin.id, "all", NOW).map((item) => item.isRead)
+      listInbox(db, platformAdmin.id, "all").map((item) => item.isRead)
     ).toEqual([true, false]);
   });
 
   it("can't touch another person's notification", () => {
     const otherAdmin = addUser("Quinn", UserRole.Admin);
     raised("Intro to SQL");
-    const [theirs] = listInbox(db, otherAdmin.id, "unread", NOW);
+    const [theirs] = listInbox(db, otherAdmin.id, "unread");
 
     expect(markRead(db, platformAdmin.id, theirs.id, NOW)).toBeNull();
     expect(countUnread(db, otherAdmin.id)).toBe(1);
@@ -231,7 +210,7 @@ describe("marking one read", () => {
 
   it("still opens an item that was already read", () => {
     raised("Intro to SQL");
-    const [item] = listInbox(db, platformAdmin.id, "unread", NOW);
+    const [item] = listInbox(db, platformAdmin.id, "unread");
     markRead(db, platformAdmin.id, item.id, NOW);
 
     expect(markRead(db, platformAdmin.id, item.id, NOW)).toEqual({
@@ -245,19 +224,19 @@ describe("marking all read up to an item", () => {
   it("marks that item and everything older, leaving anything newer unread", () => {
     raised("Oldest Course", 30);
     raised("Shown Course", 20);
-    const [newestShown] = listInbox(db, platformAdmin.id, "all", NOW);
+    const [newestShown] = listInbox(db, platformAdmin.id, "all");
     raised("Newer Course", 5);
 
     markAllReadUpTo(db, platformAdmin.id, newestShown.id, NOW);
 
     expect(
-      listInbox(db, platformAdmin.id, "unread", NOW).map((item) => item.text)
+      listInbox(db, platformAdmin.id, "unread").map((item) => item.text)
     ).toEqual(["Sam asked for a refund on Newer Course"]);
   });
 
   it("goes by when items were sent, not the order they were saved", () => {
     raised("Shown Course", 20);
-    const [newestShown] = listInbox(db, platformAdmin.id, "all", NOW);
+    const [newestShown] = listInbox(db, platformAdmin.id, "all");
     raised("Late-saved Older Course", 40);
 
     markAllReadUpTo(db, platformAdmin.id, newestShown.id, NOW);
@@ -268,7 +247,7 @@ describe("marking all read up to an item", () => {
   it("leaves another person's notifications alone", () => {
     const otherAdmin = addUser("Quinn", UserRole.Admin);
     raised("Intro to SQL", 10);
-    const [newestShown] = listInbox(db, platformAdmin.id, "all", NOW);
+    const [newestShown] = listInbox(db, platformAdmin.id, "all");
 
     markAllReadUpTo(db, platformAdmin.id, newestShown.id, NOW);
 
@@ -279,7 +258,7 @@ describe("marking all read up to an item", () => {
   it("does nothing when the item isn't theirs", () => {
     const otherAdmin = addUser("Quinn", UserRole.Admin);
     raised("Intro to SQL", 10);
-    const [theirs] = listInbox(db, otherAdmin.id, "all", NOW);
+    const [theirs] = listInbox(db, otherAdmin.id, "all");
 
     markAllReadUpTo(db, platformAdmin.id, theirs.id, NOW);
 
@@ -313,7 +292,7 @@ describe("deleting old notifications", () => {
     deleteOldNotifications(db, NOW);
 
     expect(
-      listInbox(db, platformAdmin.id, "all", NOW).map((item) => item.text)
+      listInbox(db, platformAdmin.id, "all").map((item) => item.text)
     ).toEqual([
       "Sam asked for a refund on Recent",
       "Sam asked for a refund on Exactly 90 Days",
@@ -323,11 +302,11 @@ describe("deleting old notifications", () => {
   it("deletes old items whether they were read or not", () => {
     raised("Old Read", NINETY_DAYS_IN_MINUTES + 10);
     raised("Old Unread", NINETY_DAYS_IN_MINUTES + 5);
-    const oldRead = listInbox(db, platformAdmin.id, "all", NOW)[1];
+    const oldRead = listInbox(db, platformAdmin.id, "all")[1];
     markRead(db, platformAdmin.id, oldRead.id, NOW);
 
     deleteOldNotifications(db, NOW);
 
-    expect(listInbox(db, platformAdmin.id, "all", NOW)).toEqual([]);
+    expect(listInbox(db, platformAdmin.id, "all")).toEqual([]);
   });
 });

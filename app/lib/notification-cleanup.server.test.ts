@@ -62,7 +62,7 @@ function raisedDaysAgo(courseTitle: string, days: number) {
 }
 
 function inboxTitles() {
-  return listInbox(db, platformAdmin.id, "all", new Date()).map(
+  return listInbox(db, platformAdmin.id, "all").map(
     (item) => item.text
   );
 }

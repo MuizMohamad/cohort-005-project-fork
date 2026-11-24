@@ -176,7 +176,7 @@ describe("claimSeat notifications", () => {
 
     claimSeat(db, seat.code, student.id, "AU", NOW);
 
-    expect(listInbox(db, teamAdmin.id, "unread", NOW)).toEqual([
+    expect(listInbox(db, teamAdmin.id, "unread")).toEqual([
       expect.objectContaining({
         text: `Sam claimed a seat on ${base.course.title}`,
         href: "/team",

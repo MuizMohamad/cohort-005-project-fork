@@ -21,12 +21,9 @@ import {
   newestItem,
   startInboxPolling,
 } from "~/lib/inbox-polling";
+import { groupOf, timeAgo, type InboxGroup } from "~/lib/inbox-time";
 import { NotificationKind, RefundStatus } from "~/db/schema";
-import type {
-  InboxGroup,
-  InboxItem,
-  InboxTab,
-} from "~/lib/notifications.server";
+import type { InboxItem, InboxTab } from "~/lib/notifications.server";
 
 export interface Inbox {
   unreadCount: number;
@@ -101,9 +98,11 @@ function MarkReadButton({ item }: { item: InboxItem }) {
 
 function NotificationRow({
   item,
+  timeAgo,
   onOpen,
 }: {
   item: InboxItem;
+  timeAgo: string;
   onOpen: () => void;
 }) {
   return (
@@ -132,7 +131,7 @@ function NotificationRow({
             )}
           </span>
           <span className="shrink-0 text-xs font-normal text-muted-foreground">
-            {item.timeAgo}
+            {timeAgo}
           </span>
           <span
             aria-label={item.isRead ? undefined : "Unread"}
@@ -160,8 +159,9 @@ function GroupedItems({
   items: InboxItem[];
   onOpen: () => void;
 }) {
+  const now = new Date();
   return (["today", "earlier"] as const).map((group) => {
-    const inGroup = items.filter((item) => item.group === group);
+    const inGroup = items.filter((item) => groupOf(item.sentAt, now) === group);
     if (inGroup.length === 0) return null;
     return (
       <section key={group}>
@@ -169,7 +169,12 @@ function GroupedItems({
           {GROUP_HEADINGS[group]}
         </h3>
         {inGroup.map((item) => (
-          <NotificationRow key={item.id} item={item} onOpen={onOpen} />
+          <NotificationRow
+            key={item.id}
+            item={item}
+            timeAgo={timeAgo(item.sentAt, now)}
+            onOpen={onOpen}
+          />
         ))}
       </section>
     );

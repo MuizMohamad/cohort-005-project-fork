@@ -178,7 +178,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   const currentUser = currentUserId ? getUserById(currentUserId) : null;
   const devCountry = await getDevCountry(request);
   const countryTierInfo = getCountryTierInfo(devCountry);
-  const now = new Date();
 
   const recentCourses = currentUserId
     ? getRecentlyProgressedCourses(currentUserId).map((course) => {
@@ -219,8 +218,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     inbox: currentUserId
       ? {
           unreadCount: countUnread(db, currentUserId),
-          unread: listInbox(db, currentUserId, "unread", now),
-          all: listInbox(db, currentUserId, "all", now),
+          unread: listInbox(db, currentUserId, "unread"),
+          all: listInbox(db, currentUserId, "all"),
         }
       : null,
   };
