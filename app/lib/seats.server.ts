@@ -101,7 +101,14 @@ export function claimSeat(
         .where(eq(courses.id, seat.courseId))
         .get();
       if (student && course) {
-        sendSeatClaimed(tx, purchase.userId, student.name, course.title, now);
+        sendSeatClaimed(
+          tx,
+          purchase.userId,
+          studentId,
+          student.name,
+          course.title,
+          now
+        );
       }
     }
 

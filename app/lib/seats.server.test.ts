@@ -4,7 +4,7 @@ import * as schema from "~/db/schema";
 import { UserRole } from "~/db/schema";
 import { approveRefundRequest, raiseRefundRequest } from "./refunds.server";
 import { claimSeat } from "./seats.server";
-import { listInbox } from "./notifications.server";
+import { countUnread, listInbox } from "./notifications.server";
 
 type TestDb = ReturnType<typeof createTestDb>;
 
@@ -173,5 +173,19 @@ describe("claimSeat notifications", () => {
         href: "/team",
       }),
     ]);
+  });
+
+  it("sends one notification per Seat claimed", () => {
+    for (const name of ["Ann", "Ben", "Cat", "Dan", "Eve"]) {
+      claimSeat(db, buySeat().code, addUser(name).id, "AU", NOW);
+    }
+
+    expect(countUnread(db, teamAdmin.id)).toBe(5);
+  });
+
+  it("tells a Team Admin nothing when they claim a Seat on their own Team Licence", () => {
+    claimSeat(db, buySeat().code, teamAdmin.id, "AU", NOW);
+
+    expect(countUnread(db, teamAdmin.id)).toBe(0);
   });
 });

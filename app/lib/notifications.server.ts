@@ -55,14 +55,20 @@ export function sendRefundRequestRaised(
     .run();
 }
 
-/** The Team Admin who bought the Team Licence hears about each Seat claimed. */
+/**
+ * The Team Admin who bought the Team Licence hears about each Seat claimed,
+ * unless they claimed it themselves.
+ */
 export function sendSeatClaimed(
   db: Queryable,
   teamAdminId: number,
+  studentId: number,
   studentName: string,
   courseTitle: string,
   now: Date
 ) {
+  if (teamAdminId === studentId) return;
+
   db.insert(notifications)
     .values({
       recipientId: teamAdminId,
