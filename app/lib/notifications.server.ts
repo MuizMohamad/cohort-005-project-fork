@@ -55,12 +55,38 @@ export function sendRefundRequestRaised(
     .run();
 }
 
+/** The course's Instructor hears about a new Question, never its text. */
+export function sendQuestionAsked(
+  db: Queryable,
+  instructorId: number,
+  authorName: string,
+  courseTitle: string,
+  lessonTitle: string,
+  now: Date
+) {
+  db.insert(notifications)
+    .values({
+      recipientId: instructorId,
+      kind: NotificationKind.QuestionAsked,
+      actorName: authorName,
+      courseTitle,
+      lessonTitle,
+      href: "/instructor/questions",
+      sentAt: now.toISOString(),
+    })
+    .run();
+}
+
 // ─── Showing ───
 
 function textOf(notification: Notification): string {
   switch (notification.kind) {
     case NotificationKind.RefundRequestRaised:
       return `${notification.actorName} asked for a refund on ${notification.courseTitle}`;
+    case NotificationKind.QuestionAsked:
+      return `${notification.actorName} asked a question on ${notification.lessonTitle} in ${notification.courseTitle}`;
+    case NotificationKind.QuestionAnswered:
+      return `${notification.actorName} answered a question on ${notification.lessonTitle} in ${notification.courseTitle}`;
   }
 }
 
@@ -103,7 +129,10 @@ export function listInbox(
     .from(notifications)
     .where(
       tab === "unread"
-        ? and(eq(notifications.recipientId, userId), isNull(notifications.readAt))
+        ? and(
+            eq(notifications.recipientId, userId),
+            isNull(notifications.readAt)
+          )
         : eq(notifications.recipientId, userId)
     )
     .orderBy(desc(notifications.sentAt), desc(notifications.id));

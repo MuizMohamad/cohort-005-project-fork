@@ -1,12 +1,21 @@
 import { eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "~/db/schema";
-import { comments, courses, lessons, modules } from "~/db/schema";
+import {
+  comments,
+  courses,
+  lessons,
+  modules,
+  users,
+  UserRole,
+} from "~/db/schema";
 import { MAX_COMMENT_LENGTH, MIN_COMMENT_LENGTH } from "~/lib/comments";
+import { sendQuestionAsked } from "~/lib/notifications.server";
 
 // ─── Comments ───
-// Posting a comment or reply on a lesson. Editing and deleting still live in
-// the lesson route.
+// Posting a comment or reply on a lesson, and telling the right people when it
+// is a Question or an Answer (see GLOSSARY.md). Editing and deleting still
+// live in the lesson route and send nothing.
 //
 // Every function takes the database first, so tests can hand in an in-memory
 // one. Uses positional parameters (project convention).
@@ -33,9 +42,17 @@ function getCommentById(db: Queryable, commentId: number) {
   return db.select().from(comments).where(eq(comments.id, commentId)).get();
 }
 
+function getUserById(db: Queryable, userId: number) {
+  return db.select().from(users).where(eq(users.id, userId)).get();
+}
+
 function getCourseForLesson(db: Queryable, lessonId: number) {
   return db
-    .select({ courseId: courses.id, instructorId: courses.instructorId })
+    .select({
+      courseTitle: courses.title,
+      instructorId: courses.instructorId,
+      lessonTitle: lessons.title,
+    })
     .from(lessons)
     .innerJoin(modules, eq(lessons.moduleId, modules.id))
     .innerJoin(courses, eq(modules.courseId, courses.id))
@@ -52,7 +69,8 @@ export function postComment(
   userId: number,
   lessonId: number,
   parentId: number | null,
-  body: string
+  body: string,
+  now: Date
 ) {
   const trimmed = checkCommentBody(body);
 
@@ -75,10 +93,30 @@ export function postComment(
       }
     }
 
-    return tx
+    const comment = tx
       .insert(comments)
       .values({ userId, lessonId, parentId, body: trimmed })
       .returning()
       .get();
+
+    const author = getUserById(tx, userId);
+    if (!author) {
+      throw new Error("User not found");
+    }
+    const isStaff =
+      userId === course.instructorId || author.role === UserRole.Admin;
+
+    if (parentId === null && !isStaff) {
+      sendQuestionAsked(
+        tx,
+        course.instructorId,
+        author.name,
+        course.courseTitle,
+        course.lessonTitle,
+        now
+      );
+    }
+
+    return comment;
   });
 }

@@ -859,7 +859,8 @@ export async function action({ params, request }: Route.ActionArgs) {
           currentUserId,
           lessonId,
           parsed.data.parentId ?? null,
-          parsed.data.body
+          parsed.data.body,
+          new Date()
         );
         return { ok: true };
       }
