@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "~/db/schema";
 import { notifications, users, NotificationKind, UserRole } from "~/db/schema";
@@ -74,6 +74,14 @@ function timeAgo(sentAtIso: string, now: Date): string {
   return `${Math.floor(minutes / (60 * 24))}d ago`;
 }
 
+export type InboxGroup = "today" | "earlier";
+
+function groupOf(sentAtIso: string, now: Date): InboxGroup {
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  return new Date(sentAtIso) >= midnight ? "today" : "earlier";
+}
+
 export type InboxTab = "unread" | "all";
 
 export type InboxItem = {
@@ -83,6 +91,7 @@ export type InboxItem = {
   href: string;
   sentAt: string;
   timeAgo: string;
+  group: InboxGroup;
   isRead: boolean;
 };
 
@@ -116,6 +125,7 @@ export function listInbox(
     href: row.href,
     sentAt: row.sentAt,
     timeAgo: timeAgo(row.sentAt, now),
+    group: groupOf(row.sentAt, now),
     isRead: row.readAt !== null,
   }));
 }
@@ -145,6 +155,47 @@ export function markRead(
     .run();
 
   return { href: notification.href };
+}
+
+/**
+ * Marks the person's unread items read, up to and including the newest one
+ * their panel was showing. Anything sent after it stays unread, because they
+ * haven't seen it yet. Does nothing when that item isn't theirs.
+ */
+export function markAllReadUpTo(
+  db: Queryable,
+  userId: number,
+  newestShownId: number,
+  now: Date
+) {
+  const newestShown = db
+    .select()
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.id, newestShownId),
+        eq(notifications.recipientId, userId)
+      )
+    )
+    .get();
+  if (!newestShown) return;
+
+  db.update(notifications)
+    .set({ readAt: now.toISOString() })
+    .where(
+      and(
+        eq(notifications.recipientId, userId),
+        isNull(notifications.readAt),
+        or(
+          lt(notifications.sentAt, newestShown.sentAt),
+          and(
+            eq(notifications.sentAt, newestShown.sentAt),
+            lte(notifications.id, newestShown.id)
+          )
+        )
+      )
+    )
+    .run();
 }
 
 export function countUnread(db: Queryable, userId: number): number {
