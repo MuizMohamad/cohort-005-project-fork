@@ -1,31 +1,34 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createTestDb } from "~/test/setup";
+import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 import { UserRole } from "~/db/schema";
-import { listInbox, sendRefundRequestRaised } from "./notifications.server";
+import {
+  listInbox,
+  ONE_DAY_MS,
+  sendRefundRequestRaised,
+} from "./notifications.server";
 import { startNotificationCleanup } from "./notification-cleanup.server";
 
 type TestDb = ReturnType<typeof createTestDb>;
 
 const NOW = new Date(2026, 9, 6, 12, 0, 0);
-const ONE_DAY = 24 * 60 * 60_000;
 
 let db: TestDb;
+let base: ReturnType<typeof seedBaseData>;
 let platformAdmin: typeof schema.users.$inferSelect;
 let buyer: typeof schema.users.$inferSelect;
-let stop: (() => void) | undefined;
 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   db = createTestDb();
+  base = seedBaseData(db);
   platformAdmin = addUser("Pat", UserRole.Admin);
   buyer = addUser("Sam", UserRole.Student);
 });
 
 afterEach(() => {
-  stop?.();
-  stop = undefined;
+  vi.clearAllTimers();
   vi.useRealTimers();
 });
 
@@ -38,12 +41,23 @@ function addUser(name: string, role: UserRole) {
 }
 
 function raisedDaysAgo(courseTitle: string, days: number) {
+  const course = db
+    .insert(schema.courses)
+    .values({
+      title: courseTitle,
+      slug: courseTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      description: courseTitle,
+      salesCopy: courseTitle,
+      instructorId: base.instructor.id,
+      categoryId: base.category.id,
+      status: schema.CourseStatus.Published,
+    })
+    .returning()
+    .get();
   sendRefundRequestRaised(
     db,
-    buyer.id,
-    buyer.name,
-    courseTitle,
-    new Date(Date.now() - days * ONE_DAY)
+    { buyerId: buyer.id, courseId: course.id },
+    new Date(Date.now() - days * ONE_DAY_MS)
   );
 }
 
@@ -58,16 +72,16 @@ describe("the notification clean-up job", () => {
     raisedDaysAgo("Too Old", 91);
     raisedDaysAgo("Recent", 1);
 
-    stop = startNotificationCleanup(db);
+    startNotificationCleanup(db);
 
     expect(inboxTitles()).toEqual(["Sam asked for a refund on Recent"]);
   });
 
   it("cleans up again once a day after that", () => {
-    stop = startNotificationCleanup(db);
+    startNotificationCleanup(db);
     raisedDaysAgo("Old By Tomorrow", 90);
 
-    vi.advanceTimersByTime(ONE_DAY - 1);
+    vi.advanceTimersByTime(ONE_DAY_MS - 1);
     expect(inboxTitles()).toEqual([
       "Sam asked for a refund on Old By Tomorrow",
     ]);
@@ -81,12 +95,12 @@ describe("the notification clean-up job", () => {
     db.$client.exec("ALTER TABLE notifications RENAME TO notifications_away");
 
     expect(() => {
-      stop = startNotificationCleanup(db);
+      startNotificationCleanup(db);
     }).not.toThrow();
 
     db.$client.exec("ALTER TABLE notifications_away RENAME TO notifications");
     raisedDaysAgo("Too Old", 91);
-    vi.advanceTimersByTime(ONE_DAY);
+    vi.advanceTimersByTime(ONE_DAY_MS);
 
     expect(inboxTitles()).toEqual([]);
     expect(console.error).toHaveBeenCalledOnce();

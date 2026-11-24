@@ -1,14 +1,11 @@
 import type { Db } from "~/db";
-import { deleteOldNotifications } from "./notifications.server";
+import { deleteOldNotifications, ONE_DAY_MS } from "./notifications.server";
 
 // ─── Notification clean-up job ───
 // Cadence's first timed job. Deletes old notifications once at start-up and
 // then once a day, inside the server process, apart from any save.
 
-const ONE_DAY = 24 * 60 * 60_000;
-
-/** Starts the clean-up. Returns a function that stops it. */
-export function startNotificationCleanup(db: Db): () => void {
+export function startNotificationCleanup(db: Db) {
   const run = () => {
     try {
       deleteOldNotifications(db, new Date());
@@ -18,9 +15,7 @@ export function startNotificationCleanup(db: Db): () => void {
   };
 
   run();
-  const timer = setInterval(run, ONE_DAY);
+  const timer = setInterval(run, ONE_DAY_MS);
   // Never keep the process alive just for the clean-up.
   timer.unref?.();
-
-  return () => clearInterval(timer);
 }

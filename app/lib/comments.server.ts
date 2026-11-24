@@ -44,8 +44,11 @@ function getUserById(db: Queryable, userId: number) {
   return db.select().from(users).where(eq(users.id, userId)).get();
 }
 
-/** The course's Instructor and Platform Admins: their comments are never Questions. */
-function isStaff(user: { id: number; role: UserRole }, instructorId: number) {
+/**
+ * The course's Instructor and Platform Admins: their replies to a Question are
+ * Answers, and their top-level comments are never Questions.
+ */
+function canAnswer(user: { id: number; role: UserRole }, instructorId: number) {
   return user.id === instructorId || user.role === UserRole.Admin;
 }
 
@@ -56,7 +59,6 @@ export function getCourseForLesson(db: Queryable, lessonId: number) {
       courseTitle: courses.title,
       courseSlug: courses.slug,
       instructorId: courses.instructorId,
-      lessonTitle: lessons.title,
     })
     .from(lessons)
     .innerJoin(modules, eq(lessons.moduleId, modules.id))
@@ -108,37 +110,24 @@ export function postComment(
     if (!author) {
       throw new Error("User not found");
     }
-    const authorIsStaff = isStaff(author, course.instructorId);
+    const authorCanAnswer = canAnswer(author, course.instructorId);
 
     if (!parent) {
-      if (!authorIsStaff) {
-        sendQuestionAsked(
-          tx,
-          course.instructorId,
-          author.name,
-          course.courseTitle,
-          course.lessonTitle,
-          now
-        );
+      if (!authorCanAnswer) {
+        sendQuestionAsked(tx, { authorId: userId, lessonId }, now);
       }
       return comment;
     }
 
     const questionAuthor = getUserById(tx, parent.userId);
     const isAnswer =
-      authorIsStaff &&
+      authorCanAnswer &&
       questionAuthor !== undefined &&
-      !isStaff(questionAuthor, course.instructorId);
+      !canAnswer(questionAuthor, course.instructorId);
     if (isAnswer) {
       sendQuestionAnswered(
         tx,
-        userId === course.instructorId
-          ? [questionAuthor.id]
-          : [questionAuthor.id, course.instructorId],
-        author.name,
-        course.courseTitle,
-        course.lessonTitle,
-        `/courses/${course.courseSlug}/lessons/${lessonId}`,
+        { questionAuthorId: questionAuthor.id, answererId: userId, lessonId },
         now
       );
     }

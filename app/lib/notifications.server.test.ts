@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb } from "~/test/setup";
+import { eq } from "drizzle-orm";
+import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 import { UserRole } from "~/db/schema";
 import {
@@ -21,11 +22,13 @@ function minutesBefore(minutes: number) {
 }
 
 let db: TestDb;
+let base: ReturnType<typeof seedBaseData>;
 let platformAdmin: typeof schema.users.$inferSelect;
 let buyer: typeof schema.users.$inferSelect;
 
 beforeEach(() => {
   db = createTestDb();
+  base = seedBaseData(db);
   platformAdmin = addUser("Pat", UserRole.Admin);
   buyer = addUser("Sam", UserRole.Student);
 });
@@ -38,12 +41,33 @@ function addUser(name: string, role: UserRole) {
     .get();
 }
 
+function courseTitled(title: string) {
+  const existing = db
+    .select()
+    .from(schema.courses)
+    .where(eq(schema.courses.title, title))
+    .get();
+  if (existing) return existing;
+
+  return db
+    .insert(schema.courses)
+    .values({
+      title,
+      slug: title.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      description: title,
+      salesCopy: title,
+      instructorId: base.instructor.id,
+      categoryId: base.category.id,
+      status: schema.CourseStatus.Published,
+    })
+    .returning()
+    .get();
+}
+
 function raised(courseTitle: string, minutesAgo = 0) {
   sendRefundRequestRaised(
     db,
-    buyer.id,
-    buyer.name,
-    courseTitle,
+    { buyerId: buyer.id, courseId: courseTitled(courseTitle).id },
     minutesBefore(minutesAgo)
   );
 }

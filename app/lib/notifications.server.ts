@@ -1,24 +1,44 @@
 import { and, desc, eq, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { Db, Queryable } from "~/db";
 import {
+  courses,
+  lessons,
+  modules,
   notifications,
   users,
   NotificationKind,
-  RefundStatus,
   UserRole,
+  type RefundDecision,
 } from "~/db/schema";
 
 // ─── Notifications ───
 // Each person's in-app inbox. A send function per kind works out who gets it
-// (never the person who caused it) and writes one row per recipient. The
-// wording is built here when the inbox is listed, from names copied into the
-// row at send time. See docs/specs/in-app-notifications.md.
+// (never the person who caused it), copies in the names it needs, and writes
+// one row per recipient. The wording is built here when the inbox is listed.
+// See docs/specs/in-app-notifications.md.
 //
 // Every function takes the database first, so tests can hand in an in-memory
 // one, and send functions also accept an open transaction so they can join
-// the save that caused them. Uses positional parameters (project convention).
+// the save that caused them. Send functions take the event's ids as one
+// object; the rest use positional parameters (project convention).
 
 type Notification = typeof notifications.$inferSelect;
+
+export const ONE_DAY_MS = 24 * 60 * 60_000;
+
+// ─── Where each kind opens ───
+
+export const REFUNDS_REVIEW_HREF = "/admin/refunds";
+export const TEAM_HREF = "/team";
+export const UNANSWERED_QUESTIONS_HREF = "/instructor/questions";
+
+export function courseHref(courseSlug: string) {
+  return `/courses/${courseSlug}`;
+}
+
+export function lessonHref(courseSlug: string, lessonId: number) {
+  return `/courses/${courseSlug}/lessons/${lessonId}`;
+}
 
 // ─── Sending ───
 
@@ -31,16 +51,49 @@ function platformAdminIdsExcept(db: Queryable, userId: number): number[] {
     .map((row) => row.id);
 }
 
+function nameOf(db: Queryable, userId: number) {
+  return db
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, userId))
+    .get()?.name;
+}
+
+function getCourse(db: Queryable, courseId: number) {
+  return db
+    .select({ title: courses.title, slug: courses.slug })
+    .from(courses)
+    .where(eq(courses.id, courseId))
+    .get();
+}
+
+function getLesson(db: Queryable, lessonId: number) {
+  return db
+    .select({
+      lessonTitle: lessons.title,
+      courseTitle: courses.title,
+      courseSlug: courses.slug,
+      instructorId: courses.instructorId,
+    })
+    .from(lessons)
+    .innerJoin(modules, eq(lessons.moduleId, modules.id))
+    .innerJoin(courses, eq(modules.courseId, courses.id))
+    .where(eq(lessons.id, lessonId))
+    .get();
+}
+
+type RefundRequestRaised = { buyerId: number; courseId: number };
+
 /** Every Platform Admin but the buyer hears about a new Refund Request. */
 export function sendRefundRequestRaised(
   db: Queryable,
-  buyerId: number,
-  buyerName: string,
-  courseTitle: string,
+  raised: RefundRequestRaised,
   now: Date
 ) {
-  const recipientIds = platformAdminIdsExcept(db, buyerId);
-  if (recipientIds.length === 0) return;
+  const buyerName = nameOf(db, raised.buyerId);
+  const course = getCourse(db, raised.courseId);
+  const recipientIds = platformAdminIdsExcept(db, raised.buyerId);
+  if (!buyerName || !course || recipientIds.length === 0) return;
 
   db.insert(notifications)
     .values(
@@ -48,13 +101,21 @@ export function sendRefundRequestRaised(
         recipientId,
         kind: NotificationKind.RefundRequestRaised,
         actorName: buyerName,
-        courseTitle,
-        href: "/admin/refunds",
+        courseTitle: course.title,
+        href: REFUNDS_REVIEW_HREF,
         sentAt: now.toISOString(),
       }))
     )
     .run();
 }
+
+type RefundRequestDecided = {
+  buyerId: number;
+  deciderId: number;
+  courseId: number;
+  outcome: RefundDecision;
+  note: string | null;
+};
 
 /**
  * The buyer hears the outcome of their Refund Request, with the decision note,
@@ -63,24 +124,23 @@ export function sendRefundRequestRaised(
  */
 export function sendRefundRequestDecided(
   db: Queryable,
-  buyerId: number,
-  deciderId: number,
-  deciderName: string,
-  courseTitle: string,
-  courseSlug: string,
-  outcome: RefundStatus.Approved | RefundStatus.Declined,
-  note: string | null,
+  decided: RefundRequestDecided,
   now: Date
 ) {
+  const { buyerId, deciderId, outcome, note } = decided;
+  const deciderName = nameOf(db, deciderId);
+  const course = getCourse(db, decided.courseId);
+  if (!deciderName || !course) return;
+
   const sentAt = now.toISOString();
   const forBuyer = {
     recipientId: buyerId,
     kind: NotificationKind.RefundRequestDecided,
     actorName: deciderName,
-    courseTitle,
+    courseTitle: course.title,
     outcome,
     note,
-    href: `/courses/${courseSlug}`,
+    href: courseHref(course.slug),
     sentAt,
   };
   const forOtherAdmins = platformAdminIdsExcept(db, deciderId)
@@ -89,9 +149,9 @@ export function sendRefundRequestDecided(
       recipientId,
       kind: NotificationKind.RefundRequestDecidedByOther,
       actorName: deciderName,
-      courseTitle,
+      courseTitle: course.title,
       outcome,
-      href: "/admin/refunds",
+      href: REFUNDS_REVIEW_HREF,
       sentAt,
     }));
 
@@ -101,68 +161,83 @@ export function sendRefundRequestDecided(
   db.insert(notifications).values(rows).run();
 }
 
+type SeatClaimed = {
+  teamAdminId: number;
+  studentId: number;
+  courseId: number;
+};
+
 /**
  * The Team Admin who bought the Team Licence hears about each Seat claimed,
  * unless they claimed it themselves.
  */
-export function sendSeatClaimed(
-  db: Queryable,
-  teamAdminId: number,
-  studentId: number,
-  studentName: string,
-  courseTitle: string,
-  now: Date
-) {
-  if (teamAdminId === studentId) return;
+export function sendSeatClaimed(db: Queryable, claimed: SeatClaimed, now: Date) {
+  if (claimed.teamAdminId === claimed.studentId) return;
+
+  const studentName = nameOf(db, claimed.studentId);
+  const course = getCourse(db, claimed.courseId);
+  if (!studentName || !course) return;
 
   db.insert(notifications)
     .values({
-      recipientId: teamAdminId,
+      recipientId: claimed.teamAdminId,
       kind: NotificationKind.SeatClaimed,
       actorName: studentName,
-      courseTitle,
-      href: "/team",
+      courseTitle: course.title,
+      href: TEAM_HREF,
       sentAt: now.toISOString(),
     })
     .run();
 }
+
+type QuestionAsked = { authorId: number; lessonId: number };
 
 /** The course's Instructor hears about a new Question, never its text. */
 export function sendQuestionAsked(
   db: Queryable,
-  instructorId: number,
-  authorName: string,
-  courseTitle: string,
-  lessonTitle: string,
+  asked: QuestionAsked,
   now: Date
 ) {
+  const authorName = nameOf(db, asked.authorId);
+  const lesson = getLesson(db, asked.lessonId);
+  if (!authorName || !lesson) return;
+
   db.insert(notifications)
     .values({
-      recipientId: instructorId,
+      recipientId: lesson.instructorId,
       kind: NotificationKind.QuestionAsked,
       actorName: authorName,
-      courseTitle,
-      lessonTitle,
-      href: "/instructor/questions",
+      courseTitle: lesson.courseTitle,
+      lessonTitle: lesson.lessonTitle,
+      href: UNANSWERED_QUESTIONS_HREF,
       sentAt: now.toISOString(),
     })
     .run();
 }
 
+type QuestionAnswered = {
+  questionAuthorId: number;
+  answererId: number;
+  lessonId: number;
+};
+
 /**
- * The Question's author hears about an Answer, plus the Instructor when a
- * Platform Admin wrote it. The caller picks them; never the Answer's text.
+ * The Question's author hears about an Answer, plus the course's Instructor
+ * when someone else (a Platform Admin) wrote it. Never the Answer's text.
  */
 export function sendQuestionAnswered(
   db: Queryable,
-  recipientIds: number[],
-  answererName: string,
-  courseTitle: string,
-  lessonTitle: string,
-  href: string,
+  answered: QuestionAnswered,
   now: Date
 ) {
-  if (recipientIds.length === 0) return;
+  const answererName = nameOf(db, answered.answererId);
+  const lesson = getLesson(db, answered.lessonId);
+  if (!answererName || !lesson) return;
+
+  const recipientIds =
+    answered.answererId === lesson.instructorId
+      ? [answered.questionAuthorId]
+      : [answered.questionAuthorId, lesson.instructorId];
 
   db.insert(notifications)
     .values(
@@ -170,9 +245,9 @@ export function sendQuestionAnswered(
         recipientId,
         kind: NotificationKind.QuestionAnswered,
         actorName: answererName,
-        courseTitle,
-        lessonTitle,
-        href,
+        courseTitle: lesson.courseTitle,
+        lessonTitle: lesson.lessonTitle,
+        href: lessonHref(lesson.courseSlug, answered.lessonId),
         sentAt: now.toISOString(),
       }))
     )
@@ -181,22 +256,20 @@ export function sendQuestionAnswered(
 
 // ─── Showing ───
 
-function textOf(notification: Notification): string {
-  switch (notification.kind) {
-    case NotificationKind.RefundRequestRaised:
-      return `${notification.actorName} asked for a refund on ${notification.courseTitle}`;
-    case NotificationKind.RefundRequestDecided:
-      return `Your refund on ${notification.courseTitle} was ${notification.outcome}`;
-    case NotificationKind.RefundRequestDecidedByOther:
-      return `${notification.actorName} ${notification.outcome} the refund on ${notification.courseTitle}`;
-    case NotificationKind.SeatClaimed:
-      return `${notification.actorName} claimed a seat on ${notification.courseTitle}`;
-    case NotificationKind.QuestionAsked:
-      return `${notification.actorName} asked a question on ${notification.lessonTitle} in ${notification.courseTitle}`;
-    case NotificationKind.QuestionAnswered:
-      return `${notification.actorName} answered a question on ${notification.lessonTitle} in ${notification.courseTitle}`;
-  }
-}
+const TEXT_BY_KIND: Record<NotificationKind, (n: Notification) => string> = {
+  [NotificationKind.RefundRequestRaised]: (n) =>
+    `${n.actorName} asked for a refund on ${n.courseTitle}`,
+  [NotificationKind.RefundRequestDecided]: (n) =>
+    `Your refund on ${n.courseTitle} was ${n.outcome}`,
+  [NotificationKind.RefundRequestDecidedByOther]: (n) =>
+    `${n.actorName} ${n.outcome} the refund on ${n.courseTitle}`,
+  [NotificationKind.SeatClaimed]: (n) =>
+    `${n.actorName} claimed a seat on ${n.courseTitle}`,
+  [NotificationKind.QuestionAsked]: (n) =>
+    `${n.actorName} asked a question on ${n.lessonTitle} in ${n.courseTitle}`,
+  [NotificationKind.QuestionAnswered]: (n) =>
+    `${n.actorName} answered a question on ${n.lessonTitle} in ${n.courseTitle}`,
+};
 
 function secondLineOf(notification: Notification): string | null {
   return notification.kind === NotificationKind.RefundRequestDecided
@@ -230,7 +303,7 @@ export type InboxItem = {
   text: string;
   // Shown small and grey under the text, cut off if long.
   secondLine: string | null;
-  outcome: RefundStatus.Approved | RefundStatus.Declined | null;
+  outcome: RefundDecision | null;
   href: string;
   sentAt: string;
   timeAgo: string;
@@ -264,7 +337,7 @@ export function listInbox(
   return rows.map((row) => ({
     id: row.id,
     kind: row.kind,
-    text: textOf(row),
+    text: TEXT_BY_KIND[row.kind](row),
     secondLine: secondLineOf(row),
     outcome: row.outcome,
     href: row.href,
@@ -310,16 +383,16 @@ export function markRead(
   notificationId: number,
   now: Date
 ): { href: string } | null {
-  const own = and(
+  const isTheirs = and(
     eq(notifications.id, notificationId),
     eq(notifications.recipientId, userId)
   );
-  const notification = db.select().from(notifications).where(own).get();
+  const notification = db.select().from(notifications).where(isTheirs).get();
   if (!notification) return null;
 
   db.update(notifications)
     .set({ readAt: now.toISOString() })
-    .where(and(own, isNull(notifications.readAt)))
+    .where(and(isTheirs, isNull(notifications.readAt)))
     .run();
 
   return { href: notification.href };
@@ -384,7 +457,7 @@ const KEEP_DAYS = 90;
 
 /** Removes every notification sent more than 90 days before now, read or not. */
 export function deleteOldNotifications(db: Db, now: Date) {
-  const cutoff = new Date(now.getTime() - KEEP_DAYS * 24 * 60 * 60_000);
+  const cutoff = new Date(now.getTime() - KEEP_DAYS * ONE_DAY_MS);
   db.delete(notifications)
     .where(lt(notifications.sentAt, cutoff.toISOString()))
     .run();

@@ -14,6 +14,7 @@ import {
   videoWatchEvents,
   LessonProgressStatus,
   RefundStatus,
+  type RefundDecision,
 } from "~/db/schema";
 import { formatPrice } from "~/lib/utils";
 import {
@@ -392,7 +393,11 @@ export function raiseRefundRequest(
       .returning()
       .get();
 
-    sendRefundRequestRaised(tx, buyer.id, buyer.name, course.title, now);
+    sendRefundRequestRaised(
+      tx,
+      { buyerId: buyer.id, courseId: course.id },
+      now
+    );
 
     return {
       ok: true,
@@ -693,7 +698,17 @@ export function approveRefundRequest(
       .where(eq(refunds.id, refundRequestId))
       .run();
 
-    notifyDecision(tx, purchase, platformAdminId, RefundStatus.Approved, note, now);
+    sendRefundRequestDecided(
+      tx,
+      {
+        buyerId: purchase.userId,
+        deciderId: platformAdminId,
+        courseId: purchase.courseId,
+        outcome: RefundStatus.Approved,
+        note,
+      },
+      now
+    );
 
     return {
       ok: true,
@@ -738,12 +753,15 @@ export function declineRefundRequest(
       .where(eq(refunds.id, refundRequestId))
       .run();
 
-    notifyDecision(
+    sendRefundRequestDecided(
       tx,
-      found.purchase,
-      platformAdminId,
-      RefundStatus.Declined,
-      trimmedNote,
+      {
+        buyerId: found.purchase.userId,
+        deciderId: platformAdminId,
+        courseId: found.purchase.courseId,
+        outcome: RefundStatus.Declined,
+        note: trimmedNote,
+      },
       now
     );
 
@@ -759,44 +777,11 @@ export function declineRefundRequest(
   });
 }
 
-function notifyDecision(
-  tx: Queryable,
-  purchase: Purchase,
-  platformAdminId: number,
-  decision: RefundStatus.Approved | RefundStatus.Declined,
-  note: string | null,
-  now: Date
-) {
-  const decider = tx
-    .select()
-    .from(users)
-    .where(eq(users.id, platformAdminId))
-    .get();
-  const course = tx
-    .select()
-    .from(courses)
-    .where(eq(courses.id, purchase.courseId))
-    .get();
-  if (!decider || !course) return;
-
-  sendRefundRequestDecided(
-    tx,
-    purchase.userId,
-    decider.id,
-    decider.name,
-    course.title,
-    course.slug,
-    decision,
-    note,
-    now
-  );
-}
-
 /** The email the buyer gets once their Refund Request is decided. */
 function buildDecisionEmail(
   db: Queryable,
   purchase: Purchase,
-  decision: RefundStatus.Approved | RefundStatus.Declined,
+  decision: RefundDecision,
   note: string | null
 ): Email {
   const buyer = db
