@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, ne, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "~/db/schema";
 import { notifications, users, NotificationKind, UserRole } from "~/db/schema";
@@ -157,4 +157,16 @@ export function countUnread(db: Queryable, userId: number): number {
     .get();
 
   return result?.count ?? 0;
+}
+
+// ─── Clean-up ───
+
+const KEEP_DAYS = 90;
+
+/** Removes every notification sent more than 90 days before now, read or not. */
+export function deleteOldNotifications(db: Db, now: Date) {
+  const cutoff = new Date(now.getTime() - KEEP_DAYS * 24 * 60 * 60_000);
+  db.delete(notifications)
+    .where(lt(notifications.sentAt, cutoff.toISOString()))
+    .run();
 }

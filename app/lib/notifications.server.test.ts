@@ -4,6 +4,7 @@ import * as schema from "~/db/schema";
 import { UserRole } from "~/db/schema";
 import {
   countUnread,
+  deleteOldNotifications,
   listInbox,
   markRead,
   sendRefundRequestRaised,
@@ -144,5 +145,35 @@ describe("counting unread", () => {
     raised("Intro to SQL");
 
     expect(countUnread(db, buyer.id)).toBe(0);
+  });
+});
+
+describe("deleting old notifications", () => {
+  const NINETY_DAYS_IN_MINUTES = 90 * 24 * 60;
+
+  it("deletes items sent more than 90 days ago and keeps the rest", () => {
+    raised("Too Old", NINETY_DAYS_IN_MINUTES + 1);
+    raised("Exactly 90 Days", NINETY_DAYS_IN_MINUTES);
+    raised("Recent", 5);
+
+    deleteOldNotifications(db, NOW);
+
+    expect(
+      listInbox(db, platformAdmin.id, "all", NOW).map((item) => item.text)
+    ).toEqual([
+      "Sam asked for a refund on Recent",
+      "Sam asked for a refund on Exactly 90 Days",
+    ]);
+  });
+
+  it("deletes old items whether they were read or not", () => {
+    raised("Old Read", NINETY_DAYS_IN_MINUTES + 10);
+    raised("Old Unread", NINETY_DAYS_IN_MINUTES + 5);
+    const oldRead = listInbox(db, platformAdmin.id, "all", NOW)[1];
+    markRead(db, platformAdmin.id, oldRead.id, NOW);
+
+    deleteOldNotifications(db, NOW);
+
+    expect(listInbox(db, platformAdmin.id, "all", NOW)).toEqual([]);
   });
 });
