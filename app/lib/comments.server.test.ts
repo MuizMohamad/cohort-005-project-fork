@@ -192,5 +192,43 @@ describe("postComment", () => {
       expect(inbox(base.user.id)).toEqual([]);
       expect(inbox(platformAdmin.id)).toEqual([]);
     });
+
+    it("sends nothing for a top-level comment by the Instructor or a Platform Admin", () => {
+      postComment(db, base.instructor.id, lessonId, null, "Welcome!", NOW);
+      postComment(db, platformAdmin.id, lessonId, null, "Hello all", NOW);
+
+      expect(inbox(base.instructor.id)).toEqual([]);
+      expect(inbox(platformAdmin.id)).toEqual([]);
+      expect(inbox(base.user.id)).toEqual([]);
+    });
+
+    it("tells only the Question's author when the Instructor answers it", () => {
+      const question = postComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "Why?",
+        NOW
+      );
+
+      postComment(
+        db,
+        base.instructor.id,
+        lessonId,
+        question.id,
+        "Because.",
+        NOW
+      );
+
+      expect(inbox(base.user.id)).toEqual([
+        {
+          text: "Test Instructor answered a question on Lesson 1 in Test Course",
+          href: `/courses/test-course/lessons/${lessonId}`,
+        },
+      ]);
+      expect(inbox(base.instructor.id)).toHaveLength(1);
+      expect(inbox(platformAdmin.id)).toEqual([]);
+    });
   });
 });

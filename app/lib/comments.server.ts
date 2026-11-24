@@ -10,7 +10,10 @@ import {
   UserRole,
 } from "~/db/schema";
 import { MAX_COMMENT_LENGTH, MIN_COMMENT_LENGTH } from "~/lib/comments";
-import { sendQuestionAsked } from "~/lib/notifications.server";
+import {
+  sendQuestionAnswered,
+  sendQuestionAsked,
+} from "~/lib/notifications.server";
 
 // ─── Comments ───
 // Posting a comment or reply on a lesson, and telling the right people when it
@@ -46,10 +49,16 @@ function getUserById(db: Queryable, userId: number) {
   return db.select().from(users).where(eq(users.id, userId)).get();
 }
 
+/** The course's Instructor and Platform Admins: their comments are never Questions. */
+function isStaff(user: { id: number; role: UserRole }, instructorId: number) {
+  return user.id === instructorId || user.role === UserRole.Admin;
+}
+
 function getCourseForLesson(db: Queryable, lessonId: number) {
   return db
     .select({
       courseTitle: courses.title,
+      courseSlug: courses.slug,
       instructorId: courses.instructorId,
       lessonTitle: lessons.title,
     })
@@ -80,8 +89,8 @@ export function postComment(
       throw new Error("Lesson not found");
     }
 
+    const parent = parentId === null ? null : getCommentById(tx, parentId);
     if (parentId !== null) {
-      const parent = getCommentById(tx, parentId);
       if (!parent) {
         throw new Error("Parent comment not found");
       }
@@ -103,16 +112,35 @@ export function postComment(
     if (!author) {
       throw new Error("User not found");
     }
-    const isStaff =
-      userId === course.instructorId || author.role === UserRole.Admin;
+    const authorIsStaff = isStaff(author, course.instructorId);
 
-    if (parentId === null && !isStaff) {
-      sendQuestionAsked(
+    if (!parent) {
+      if (!authorIsStaff) {
+        sendQuestionAsked(
+          tx,
+          course.instructorId,
+          author.name,
+          course.courseTitle,
+          course.lessonTitle,
+          now
+        );
+      }
+      return comment;
+    }
+
+    const questionAuthor = getUserById(tx, parent.userId);
+    const isAnswer =
+      authorIsStaff &&
+      questionAuthor !== undefined &&
+      !isStaff(questionAuthor, course.instructorId);
+    if (isAnswer) {
+      sendQuestionAnswered(
         tx,
-        course.instructorId,
+        [questionAuthor.id],
         author.name,
         course.courseTitle,
         course.lessonTitle,
+        `/courses/${course.courseSlug}/lessons/${lessonId}`,
         now
       );
     }

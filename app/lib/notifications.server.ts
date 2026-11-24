@@ -77,6 +77,33 @@ export function sendQuestionAsked(
     .run();
 }
 
+/** Who an Answer is for is worked out by the caller; never its text. */
+export function sendQuestionAnswered(
+  db: Queryable,
+  recipientIds: number[],
+  answererName: string,
+  courseTitle: string,
+  lessonTitle: string,
+  href: string,
+  now: Date
+) {
+  if (recipientIds.length === 0) return;
+
+  db.insert(notifications)
+    .values(
+      recipientIds.map((recipientId) => ({
+        recipientId,
+        kind: NotificationKind.QuestionAnswered,
+        actorName: answererName,
+        courseTitle,
+        lessonTitle,
+        href,
+        sentAt: now.toISOString(),
+      }))
+    )
+    .run();
+}
+
 // ─── Showing ───
 
 function textOf(notification: Notification): string {
