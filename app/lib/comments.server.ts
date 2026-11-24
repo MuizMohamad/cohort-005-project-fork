@@ -29,6 +29,10 @@ export function checkCommentBody(body: string) {
   return trimmed;
 }
 
+function getCommentById(db: Queryable, commentId: number) {
+  return db.select().from(comments).where(eq(comments.id, commentId)).get();
+}
+
 function getCourseForLesson(db: Queryable, lessonId: number) {
   return db
     .select({ courseId: courses.id, instructorId: courses.instructorId })
@@ -56,6 +60,19 @@ export function postComment(
     const course = getCourseForLesson(tx, lessonId);
     if (!course) {
       throw new Error("Lesson not found");
+    }
+
+    if (parentId !== null) {
+      const parent = getCommentById(tx, parentId);
+      if (!parent) {
+        throw new Error("Parent comment not found");
+      }
+      if (parent.lessonId !== lessonId) {
+        throw new Error("Parent comment belongs to a different lesson");
+      }
+      if (parent.parentId !== null) {
+        throw new Error("Replies can only be one level deep");
+      }
     }
 
     return tx
