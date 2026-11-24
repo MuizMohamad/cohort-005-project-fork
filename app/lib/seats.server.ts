@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { coupons, enrollments } from "~/db/schema";
+import { coupons, enrollments, purchases } from "~/db/schema";
 import { getSeatAvailability, type Db } from "~/lib/refunds.server";
 
 // ─── Seats ───
@@ -60,6 +60,20 @@ export function claimSeat(
 
     if (existingEnrollment) {
       return { ok: false, error: "You are already enrolled in this course" };
+    }
+
+    const purchase = tx
+      .select()
+      .from(purchases)
+      .where(eq(purchases.id, seat.purchaseId))
+      .get();
+
+    if (purchase?.country && purchase.country !== studentCountry) {
+      return {
+        ok: false,
+        error:
+          "This coupon can only be redeemed from the same country as the purchaser",
+      };
     }
 
     tx.update(coupons)

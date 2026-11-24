@@ -139,4 +139,22 @@ describe("claimSeat", () => {
       claimSeat(db, secondSeat.code, addUser("Kim").id, "AU", NOW).ok
     ).toBe(true);
   });
+
+  it("refuses a Student in a different country from the buyer", () => {
+    const seat = buySeat("AU");
+
+    expect(claimSeat(db, seat.code, addUser("Sam").id, "NZ", NOW)).toEqual({
+      ok: false,
+      error:
+        "This coupon can only be redeemed from the same country as the purchaser",
+    });
+  });
+
+  it("lets a Student anywhere claim a Seat bought with no country", () => {
+    const seat = buySeat(null);
+
+    expect(claimSeat(db, seat.code, addUser("Sam").id, "NZ", NOW).ok).toBe(
+      true
+    );
+  });
 });
