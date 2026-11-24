@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 import { UserRole } from "~/db/schema";
+import { approveRefundRequest, raiseRefundRequest } from "./refunds.server";
 import { claimSeat } from "./seats.server";
 
 type TestDb = ReturnType<typeof createTestDb>;
@@ -39,6 +40,7 @@ function buySeat(country: string | null = "AU") {
       courseId: base.course.id,
       amountPaid: 7900,
       country,
+      createdAt: NOW.toISOString(),
     })
     .returning()
     .get();
@@ -86,6 +88,41 @@ describe("claimSeat", () => {
     expect(claimSeat(db, seat.code, addUser("Kim").id, "AU", NOW)).toEqual({
       ok: false,
       error: "Coupon has already been redeemed",
+    });
+  });
+
+  it("refuses a Seat on hold while its Team Licence has an Open Refund Request", () => {
+    const seat = buySeat();
+    raiseRefundRequest(db, seat.purchaseId, teamAdmin.id, "Not needed", NOW);
+
+    expect(claimSeat(db, seat.code, addUser("Sam").id, "AU", NOW)).toEqual({
+      ok: false,
+      error:
+        "This seat can't be claimed right now. Ask the person who shared it with you.",
+    });
+  });
+
+  it("refuses a Seat whose Team Licence was refunded", () => {
+    const seat = buySeat();
+    const raised = raiseRefundRequest(
+      db,
+      seat.purchaseId,
+      teamAdmin.id,
+      "Not needed",
+      NOW
+    );
+    if (!raised.ok) throw new Error(raised.error);
+    const platformAdmin = db
+      .insert(schema.users)
+      .values({ name: "Pat", email: "pat@example.com", role: UserRole.Admin })
+      .returning()
+      .get();
+    approveRefundRequest(db, raised.refundRequestId, platformAdmin.id, null, NOW);
+
+    expect(claimSeat(db, seat.code, addUser("Sam").id, "AU", NOW)).toEqual({
+      ok: false,
+      error:
+        "This seat is no longer available. Ask the person who shared it with you.",
     });
   });
 });

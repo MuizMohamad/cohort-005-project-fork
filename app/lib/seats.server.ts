@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { coupons, enrollments } from "~/db/schema";
-import type { Db } from "~/lib/refunds.server";
+import { getSeatAvailability, type Db } from "~/lib/refunds.server";
 
 // ─── Seats ───
 // A Student claiming a Seat on a Team Licence to get an Enrollment. See
@@ -37,6 +37,14 @@ export function claimSeat(
 
     if (seat.redeemedByUserId !== null) {
       return { ok: false, error: "Coupon has already been redeemed" };
+    }
+
+    const availability = getSeatAvailability(tx, seat);
+    if (availability === "on_hold") {
+      return { ok: false, error: SEAT_ON_HOLD };
+    }
+    if (availability === "refunded") {
+      return { ok: false, error: SEAT_REFUNDED };
     }
 
     tx.update(coupons)
