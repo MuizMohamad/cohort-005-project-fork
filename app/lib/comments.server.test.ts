@@ -251,5 +251,91 @@ describe("postComment", () => {
       expect(inbox(base.instructor.id)).toContainEqual(answered);
       expect(inbox(platformAdmin.id)).toEqual([]);
     });
+
+    it("sends nothing for a reply by someone who is not staff", () => {
+      const otherStudent = db
+        .insert(schema.users)
+        .values({
+          name: "Other Student",
+          email: "other@example.com",
+          role: schema.UserRole.Student,
+        })
+        .returning()
+        .get();
+      const question = postComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "Why?",
+        NOW
+      );
+
+      postComment(db, otherStudent.id, lessonId, question.id, "Same!", NOW);
+      postComment(db, base.user.id, lessonId, question.id, "Anyone?", NOW);
+
+      expect(inbox(base.user.id)).toEqual([]);
+      expect(inbox(otherStudent.id)).toEqual([]);
+      expect(inbox(base.instructor.id)).toHaveLength(1);
+    });
+
+    it("sends nothing for staff replies under a staff comment", () => {
+      const notice = postComment(
+        db,
+        base.instructor.id,
+        lessonId,
+        null,
+        "Welcome!",
+        NOW
+      );
+
+      postComment(db, platformAdmin.id, lessonId, notice.id, "Thanks", NOW);
+
+      expect(inbox(base.instructor.id)).toEqual([]);
+      expect(inbox(platformAdmin.id)).toEqual([]);
+    });
+
+    it("sends one notification per Answer", () => {
+      const question = postComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "Why?",
+        NOW
+      );
+
+      postComment(db, base.instructor.id, lessonId, question.id, "One", NOW);
+      postComment(db, base.instructor.id, lessonId, question.id, "Two", NOW);
+
+      expect(inbox(base.user.id)).toHaveLength(2);
+    });
+
+    it("never shows the Question or Answer text", () => {
+      const question = postComment(
+        db,
+        base.user.id,
+        lessonId,
+        null,
+        "My secret question",
+        NOW
+      );
+      postComment(
+        db,
+        platformAdmin.id,
+        lessonId,
+        question.id,
+        "My secret answer",
+        NOW
+      );
+
+      const texts = [base.user.id, base.instructor.id].flatMap((id) =>
+        inbox(id).map((item) => item.text)
+      );
+      expect(texts).toHaveLength(3);
+      for (const text of texts) {
+        expect(text).not.toContain("secret");
+      }
+    });
   });
 });
