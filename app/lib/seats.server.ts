@@ -1,11 +1,14 @@
 import { and, eq } from "drizzle-orm";
-import { coupons, courses, enrollments, purchases, users } from "~/db/schema";
+import { coupons, enrollments, purchases } from "~/db/schema";
 import { sendSeatClaimed } from "~/lib/notifications.server";
-import { getSeatAvailability, type Db } from "~/lib/refunds.server";
+import type { Db } from "~/db";
+import { getSeatAvailability } from "~/lib/refunds.server";
 
 // ─── Seats ───
 // A Student claiming a Seat on a Team Licence to get an Enrollment. See
-// GLOSSARY.md for the language.
+// GLOSSARY.md for the language. Seats live in the `coupons` table, and some
+// refusal messages still say "coupon": they are kept word for word because
+// people already see them.
 //
 // Every function takes the database first, so tests can hand in an in-memory
 // one. Uses positional parameters (project convention).
@@ -90,26 +93,11 @@ export function claimSeat(
       .get();
 
     if (purchase) {
-      const student = tx
-        .select({ name: users.name })
-        .from(users)
-        .where(eq(users.id, studentId))
-        .get();
-      const course = tx
-        .select({ title: courses.title })
-        .from(courses)
-        .where(eq(courses.id, seat.courseId))
-        .get();
-      if (student && course) {
-        sendSeatClaimed(
-          tx,
-          purchase.userId,
-          studentId,
-          student.name,
-          course.title,
-          now
-        );
-      }
+      sendSeatClaimed(
+        tx,
+        { teamAdminId: purchase.userId, studentId, courseId: seat.courseId },
+        now
+      );
     }
 
     return { ok: true, enrollment };

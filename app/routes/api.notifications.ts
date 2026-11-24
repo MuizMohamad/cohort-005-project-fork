@@ -20,5 +20,5 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw data("Invalid tab", { status: 400 });
   }
 
-  return Response.json(checkInbox(db, currentUserId, tab.data, new Date()));
+  return Response.json(checkInbox(db, currentUserId, tab.data));
 }

@@ -12,56 +12,45 @@ import {
   Receipt,
   UserPlus,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
 import {
-  documentPage,
+  documentVisibility,
   fetchInboxCheck,
   mergeInboxItems,
   newestItem,
   startInboxPolling,
 } from "~/lib/inbox-polling";
+import { groupOf, timeAgo, type InboxGroup } from "~/lib/inbox-time";
 import { NotificationKind, RefundStatus } from "~/db/schema";
-import type {
-  InboxGroup,
-  InboxItem,
-  InboxTab,
-} from "~/lib/notifications.server";
+import type { InboxItem, InboxTab } from "~/lib/notifications.server";
 
+/** What the app layout's loader gives the bell on every page load and save. */
 export interface Inbox {
   unreadCount: number;
-  unread: InboxItem[];
-  all: InboxItem[];
 }
 
-function KindIcon({
-  kind,
-  outcome,
-}: {
-  kind: NotificationKind;
-  outcome: InboxItem["outcome"];
-}) {
-  switch (kind) {
-    case NotificationKind.RefundRequestRaised:
-      return <Receipt className="size-4 shrink-0 text-muted-foreground" />;
-    case NotificationKind.RefundRequestDecided:
-    case NotificationKind.RefundRequestDecidedByOther:
-      return outcome === RefundStatus.Approved ? (
-        <CircleCheck className="size-4 shrink-0 text-green-600" />
-      ) : (
-        <CircleX className="size-4 shrink-0 text-red-600" />
-      );
-    case NotificationKind.SeatClaimed:
-      return <UserPlus className="size-4 shrink-0 text-muted-foreground" />;
-    case NotificationKind.QuestionAsked:
-      return (
-        <MessageCircleQuestion className="size-4 shrink-0 text-muted-foreground" />
-      );
-    case NotificationKind.QuestionAnswered:
-      return (
-        <MessageCircleReply className="size-4 shrink-0 text-muted-foreground" />
-      );
+type InboxLists = Partial<Record<InboxTab, InboxItem[]>>;
+
+const KIND_ICONS: Record<NotificationKind, LucideIcon> = {
+  [NotificationKind.RefundRequestRaised]: Receipt,
+  [NotificationKind.RefundRequestDecided]: Receipt,
+  [NotificationKind.RefundRequestDecidedByOther]: Receipt,
+  [NotificationKind.SeatClaimed]: UserPlus,
+  [NotificationKind.QuestionAsked]: MessageCircleQuestion,
+  [NotificationKind.QuestionAnswered]: MessageCircleReply,
+};
+
+function KindIcon({ item }: { item: InboxItem }) {
+  if (item.outcome === RefundStatus.Approved) {
+    return <CircleCheck className="size-4 shrink-0 text-green-600" />;
   }
+  if (item.outcome === RefundStatus.Declined) {
+    return <CircleX className="size-4 shrink-0 text-red-600" />;
+  }
+  const Icon = KIND_ICONS[item.kind];
+  return <Icon className="size-4 shrink-0 text-muted-foreground" />;
 }
 
 function CountBadge({ count, className }: { count: number; className?: string }) {
@@ -101,9 +90,11 @@ function MarkReadButton({ item }: { item: InboxItem }) {
 
 function NotificationRow({
   item,
+  timeAgo,
   onOpen,
 }: {
   item: InboxItem;
+  timeAgo: string;
   onOpen: () => void;
 }) {
   return (
@@ -122,7 +113,7 @@ function NotificationRow({
               : "bg-blue-50/60 font-medium dark:bg-blue-950/30"
           )}
         >
-          <KindIcon kind={item.kind} outcome={item.outcome} />
+          <KindIcon item={item} />
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="truncate">{item.text}</span>
             {item.secondLine && (
@@ -132,7 +123,7 @@ function NotificationRow({
             )}
           </span>
           <span className="shrink-0 text-xs font-normal text-muted-foreground">
-            {item.timeAgo}
+            {timeAgo}
           </span>
           <span
             aria-label={item.isRead ? undefined : "Unread"}
@@ -160,8 +151,9 @@ function GroupedItems({
   items: InboxItem[];
   onOpen: () => void;
 }) {
+  const now = new Date();
   return (["today", "earlier"] as const).map((group) => {
-    const inGroup = items.filter((item) => item.group === group);
+    const inGroup = items.filter((item) => groupOf(item.sentAt, now) === group);
     if (inGroup.length === 0) return null;
     return (
       <section key={group}>
@@ -169,7 +161,12 @@ function GroupedItems({
           {GROUP_HEADINGS[group]}
         </h3>
         {inGroup.map((item) => (
-          <NotificationRow key={item.id} item={item} onOpen={onOpen} />
+          <NotificationRow
+            key={item.id}
+            item={item}
+            timeAgo={timeAgo(item.sentAt, now)}
+            onOpen={onOpen}
+          />
         ))}
       </section>
     );
@@ -202,18 +199,20 @@ function MarkAllReadButton({ newestShownId }: { newestShownId: number }) {
 }
 
 function NotificationPanel({
-  inbox,
+  unreadCount,
+  lists,
   tab,
   setTab,
   onClose,
 }: {
-  inbox: Inbox;
+  unreadCount: number;
+  lists: InboxLists;
   tab: InboxTab;
   setTab: (tab: InboxTab) => void;
   onClose: () => void;
 }) {
-  const items = tab === "unread" ? inbox.unread : inbox.all;
-  const newestShown = newestItem(inbox.unread, inbox.all);
+  const items = lists[tab];
+  const newestShown = items && newestItem(items);
 
   return (
     <>
@@ -243,15 +242,19 @@ function NotificationPanel({
               )}
             >
               {t}
-              {t === "unread" && ` (${inbox.unreadCount})`}
+              {t === "unread" && ` (${unreadCount})`}
             </button>
           ))}
-          {inbox.unreadCount > 0 && newestShown && (
+          {unreadCount > 0 && newestShown && (
             <MarkAllReadButton newestShownId={newestShown.id} />
           )}
         </div>
         <div className="flex-1 overflow-y-auto">
-          {items.length === 0 ? (
+          {!items ? (
+            <div className="px-6 py-12 text-center text-sm text-muted-foreground">
+              Loading…
+            </div>
+          ) : items.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-6 py-12 text-center text-sm text-muted-foreground">
               <InboxIcon className="size-8 opacity-40" />
               {EMPTY_MESSAGES[tab]}
@@ -266,46 +269,53 @@ function NotificationPanel({
 }
 
 /**
- * The layout loader's inbox, kept fresh between page loads by the background
- * check. While the panel is open the check also brings that tab's list.
+ * The unread count from the layout loader, kept fresh between page loads by
+ * the background check. While the panel is open the check also brings the
+ * open tab's list, which is merged into what is showing.
  */
-function useLiveInbox(inbox: Inbox, openTab: InboxTab | null): Inbox {
-  const [live, setLive] = useState(inbox);
+function useLiveInbox(inbox: Inbox, openTab: InboxTab | null) {
+  const [unreadCount, setUnreadCount] = useState(inbox.unreadCount);
+  const [lists, setLists] = useState<InboxLists>({});
   const openTabRef = useRef(openTab);
   const pollingRef = useRef<ReturnType<typeof startInboxPolling>>(null);
 
-  useEffect(() => setLive(inbox), [inbox]);
+  // A page change or save re-runs the layout loader. Take its count, and
+  // re-check the open tab so an item just marked read shows as read.
+  useEffect(() => {
+    setUnreadCount(inbox.unreadCount);
+    if (openTabRef.current) pollingRef.current?.checkNow();
+  }, [inbox]);
 
   useEffect(() => {
     openTabRef.current = openTab;
     if (openTab) pollingRef.current?.checkNow();
+    else setLists({});
   }, [openTab]);
 
   useEffect(() => {
     const polling = startInboxPolling(
       () => fetchInboxCheck(openTabRef.current),
-      (check) =>
-        setLive((prev) => ({
+      ({ unreadCount, tab, items }) => {
+        setUnreadCount(unreadCount);
+        if (!tab || !items || !openTabRef.current) return;
+        setLists((prev) => ({
           ...prev,
-          unreadCount: check.unreadCount,
-          ...(check.tab &&
-            check.items && {
-              [check.tab]: mergeInboxItems(prev[check.tab], check.items),
-            }),
-        })),
-      documentPage
+          [tab]: mergeInboxItems(prev[tab] ?? [], items, tab),
+        }));
+      },
+      documentVisibility
     );
     pollingRef.current = polling;
     return polling.stop;
   }, []);
 
-  return live;
+  return { unreadCount, lists };
 }
 
-export function NotificationBell({ inbox: loadedInbox }: { inbox: Inbox }) {
+export function NotificationBell({ inbox }: { inbox: Inbox }) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<InboxTab>("unread");
-  const inbox = useLiveInbox(loadedInbox, open ? tab : null);
+  const { unreadCount, lists } = useLiveInbox(inbox, open ? tab : null);
 
   return (
     <>
@@ -314,18 +324,16 @@ export function NotificationBell({ inbox: loadedInbox }: { inbox: Inbox }) {
           setTab("unread");
           setOpen(true);
         }}
-        aria-label={`Notifications, ${inbox.unreadCount} unread`}
+        aria-label={`Notifications, ${unreadCount} unread`}
         className="relative ml-auto rounded-md p-1.5 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
       >
         <Bell className="size-4" />
-        <CountBadge
-          count={inbox.unreadCount}
-          className="absolute -right-1 -top-1"
-        />
+        <CountBadge count={unreadCount} className="absolute -right-1 -top-1" />
       </button>
       {open && (
         <NotificationPanel
-          inbox={inbox}
+          unreadCount={unreadCount}
+          lists={lists}
           tab={tab}
           setTab={setTab}
           onClose={() => setOpen(false)}

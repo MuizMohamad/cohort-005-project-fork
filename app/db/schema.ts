@@ -37,6 +37,8 @@ export enum RefundStatus {
   Declined = "declined",
 }
 
+export type RefundDecision = RefundStatus.Approved | RefundStatus.Declined;
+
 export enum TeamMemberRole {
   Admin = "admin",
   Member = "member",
@@ -388,9 +390,7 @@ export const notifications = sqliteTable(
     // Only for Question asked and Question answered.
     lessonTitle: text("lesson_title"),
     // Only on a decided Refund Request.
-    outcome: text("outcome").$type<
-      RefundStatus.Approved | RefundStatus.Declined
-    >(),
+    outcome: text("outcome").$type<RefundDecision>(),
     // The decision note, only on the buyer's decided Refund Request.
     note: text("note"),
     // Stored as-is and opened as-is, even if the page no longer exists.

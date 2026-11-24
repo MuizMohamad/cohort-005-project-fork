@@ -285,7 +285,7 @@ describe("notifying Platform Admins of a new Refund Request", () => {
     raise(purchase.id, base.user.id);
 
     for (const admin of [platformAdmin, secondAdmin]) {
-      expect(listInbox(db, admin.id, "unread", NOW)).toMatchObject([
+      expect(listInbox(db, admin.id, "unread")).toMatchObject([
         {
           kind: NotificationKind.RefundRequestRaised,
           text: "Test User asked for a refund on Test Course",
@@ -301,7 +301,7 @@ describe("notifying Platform Admins of a new Refund Request", () => {
 
     raise(purchase.id, base.user.id);
 
-    const [item] = listInbox(db, platformAdmin.id, "all", NOW);
+    const [item] = listInbox(db, platformAdmin.id, "all");
     expect(JSON.stringify(item)).not.toContain("It was not what I expected.");
   });
 
@@ -525,7 +525,7 @@ describe("notifying people of a decided Refund Request", () => {
 
     approveRefundRequest(db, id, platformAdmin.id, null, NOW);
 
-    expect(listInbox(db, base.user.id, "unread", NOW)).toEqual([
+    expect(listInbox(db, base.user.id, "unread")).toEqual([
       expect.objectContaining({
         kind: NotificationKind.RefundRequestDecided,
         text: "Your refund on Test Course was approved",
@@ -542,7 +542,7 @@ describe("notifying people of a decided Refund Request", () => {
 
     declineRefundRequest(db, id, platformAdmin.id, "  You finished the course. ", NOW);
 
-    expect(listInbox(db, base.user.id, "unread", NOW)).toEqual([
+    expect(listInbox(db, base.user.id, "unread")).toEqual([
       expect.objectContaining({
         kind: NotificationKind.RefundRequestDecided,
         text: "Your refund on Test Course was declined",
@@ -558,12 +558,12 @@ describe("notifying people of a decided Refund Request", () => {
     const rosa = addPlatformAdmin("Rosa");
     const purchase = buyForSelf(base.user.id);
     const id = raise(purchase.id, base.user.id);
-    const raisedItemsOnly = listInbox(db, platformAdmin.id, "all", NOW).length;
+    const raisedItemsOnly = listInbox(db, platformAdmin.id, "all").length;
 
     declineRefundRequest(db, id, platformAdmin.id, "Past half way.", NOW);
 
     for (const admin of [quinn, rosa]) {
-      expect(listInbox(db, admin.id, "all", NOW)[0]).toMatchObject({
+      expect(listInbox(db, admin.id, "all")[0]).toMatchObject({
         kind: NotificationKind.RefundRequestDecidedByOther,
         text: "Pat Admin declined the refund on Test Course",
         outcome: RefundStatus.Declined,
@@ -571,7 +571,7 @@ describe("notifying people of a decided Refund Request", () => {
         href: "/admin/refunds",
       });
     }
-    expect(listInbox(db, platformAdmin.id, "all", NOW)).toHaveLength(
+    expect(listInbox(db, platformAdmin.id, "all")).toHaveLength(
       raisedItemsOnly
     );
     expect(countUnread(db, base.instructor.id)).toBe(0);
@@ -585,7 +585,7 @@ describe("notifying people of a decided Refund Request", () => {
     approveRefundRequest(db, id, platformAdmin.id, "Sorted.", NOW);
 
     expect(
-      listInbox(db, quinn.id, "all", NOW).map((item) => item.kind)
+      listInbox(db, quinn.id, "all").map((item) => item.kind)
     ).toEqual([NotificationKind.RefundRequestDecided]);
   });
 
@@ -597,7 +597,7 @@ describe("notifying people of a decided Refund Request", () => {
     approveRefundRequest(db, id, platformAdmin.id, null, NOW);
 
     expect(countUnread(db, platformAdmin.id)).toBe(0);
-    expect(listInbox(db, quinn.id, "all", NOW)[0]).toMatchObject({
+    expect(listInbox(db, quinn.id, "all")[0]).toMatchObject({
       text: "Pat Admin approved the refund on Test Course",
     });
   });
@@ -610,8 +610,8 @@ describe("notifying people of a decided Refund Request", () => {
     approveRefundRequest(db, id, platformAdmin.id, "Done.", NOW);
 
     const items = [
-      ...listInbox(db, base.user.id, "all", NOW),
-      ...listInbox(db, platformAdmin.id, "all", NOW),
+      ...listInbox(db, base.user.id, "all"),
+      ...listInbox(db, platformAdmin.id, "all"),
     ];
     for (const item of items) {
       expect(JSON.stringify(item)).not.toContain("It was not what I expected.");

@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
-import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import * as schema from "~/db/schema";
+import type { Db, Queryable } from "~/db";
 import {
   comments,
   courses,
@@ -23,10 +22,6 @@ import {
 // Every function takes the database first, so tests can hand in an in-memory
 // one. Uses positional parameters (project convention).
 
-export type Db = BetterSQLite3Database<typeof schema>;
-type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
-type Queryable = Db | Tx;
-
 /** Trims a comment body, throwing if it is empty or too long. */
 export function checkCommentBody(body: string) {
   const trimmed = body.trim();
@@ -41,7 +36,7 @@ export function checkCommentBody(body: string) {
   return trimmed;
 }
 
-function getCommentById(db: Queryable, commentId: number) {
+export function getCommentById(db: Queryable, commentId: number) {
   return db.select().from(comments).where(eq(comments.id, commentId)).get();
 }
 
@@ -49,18 +44,21 @@ function getUserById(db: Queryable, userId: number) {
   return db.select().from(users).where(eq(users.id, userId)).get();
 }
 
-/** The course's Instructor and Platform Admins: their comments are never Questions. */
-function isStaff(user: { id: number; role: UserRole }, instructorId: number) {
+/**
+ * The course's Instructor and Platform Admins: their replies to a Question are
+ * Answers, and their top-level comments are never Questions.
+ */
+function canAnswer(user: { id: number; role: UserRole }, instructorId: number) {
   return user.id === instructorId || user.role === UserRole.Admin;
 }
 
-function getCourseForLesson(db: Queryable, lessonId: number) {
+export function getCourseForLesson(db: Queryable, lessonId: number) {
   return db
     .select({
+      courseId: courses.id,
       courseTitle: courses.title,
       courseSlug: courses.slug,
       instructorId: courses.instructorId,
-      lessonTitle: lessons.title,
     })
     .from(lessons)
     .innerJoin(modules, eq(lessons.moduleId, modules.id))
@@ -112,37 +110,24 @@ export function postComment(
     if (!author) {
       throw new Error("User not found");
     }
-    const authorIsStaff = isStaff(author, course.instructorId);
+    const authorCanAnswer = canAnswer(author, course.instructorId);
 
     if (!parent) {
-      if (!authorIsStaff) {
-        sendQuestionAsked(
-          tx,
-          course.instructorId,
-          author.name,
-          course.courseTitle,
-          course.lessonTitle,
-          now
-        );
+      if (!authorCanAnswer) {
+        sendQuestionAsked(tx, { authorId: userId, lessonId }, now);
       }
       return comment;
     }
 
     const questionAuthor = getUserById(tx, parent.userId);
     const isAnswer =
-      authorIsStaff &&
+      authorCanAnswer &&
       questionAuthor !== undefined &&
-      !isStaff(questionAuthor, course.instructorId);
+      !canAnswer(questionAuthor, course.instructorId);
     if (isAnswer) {
       sendQuestionAnswered(
         tx,
-        userId === course.instructorId
-          ? [questionAuthor.id]
-          : [questionAuthor.id, course.instructorId],
-        author.name,
-        course.courseTitle,
-        course.lessonTitle,
-        `/courses/${course.courseSlug}/lessons/${lessonId}`,
+        { questionAuthorId: questionAuthor.id, answererId: userId, lessonId },
         now
       );
     }

@@ -5,12 +5,12 @@ import {
   mergeInboxItems,
   newestItem,
   startInboxPolling,
-  type CheckOutcome,
+  type PollResult,
 } from "./inbox-polling";
 
 const MINUTE = 60_000;
 
-function fakePage() {
+function fakeVisibility() {
   const listeners = new Set<() => void>();
   return {
     hidden: false,
@@ -28,18 +28,18 @@ function fakePage() {
   };
 }
 
-function ok(unreadCount: number): CheckOutcome {
+function ok(unreadCount: number): PollResult {
   return { status: "ok", check: { unreadCount, tab: null, items: null } };
 }
 
 describe("polling the inbox", () => {
-  let page: ReturnType<typeof fakePage>;
+  let visibility: ReturnType<typeof fakeVisibility>;
   let seen: InboxCheck[];
   let stop: () => void;
 
   beforeEach(() => {
     vi.useFakeTimers();
-    page = fakePage();
+    visibility = fakeVisibility();
     seen = [];
   });
 
@@ -48,8 +48,8 @@ describe("polling the inbox", () => {
     vi.useRealTimers();
   });
 
-  function start(check: () => Promise<CheckOutcome>) {
-    const polling = startInboxPolling(check, (c) => seen.push(c), page);
+  function start(check: () => Promise<PollResult>) {
+    const polling = startInboxPolling(check, (c) => seen.push(c), visibility);
     stop = polling.stop;
     return polling;
   }
@@ -73,11 +73,11 @@ describe("polling the inbox", () => {
     const check = vi.fn(async () => ok(1));
     start(check);
 
-    page.setHidden(true);
+    visibility.setHidden(true);
     await vi.advanceTimersByTimeAsync(10 * MINUTE);
     expect(check).not.toHaveBeenCalled();
 
-    page.setHidden(false);
+    visibility.setHidden(false);
     await vi.advanceTimersByTimeAsync(0);
     expect(check).toHaveBeenCalledTimes(1);
 
@@ -87,7 +87,7 @@ describe("polling the inbox", () => {
 
   it("stays quiet when a check fails and tries again 60 seconds later", async () => {
     const check = vi
-      .fn<() => Promise<CheckOutcome>>()
+      .fn<() => Promise<PollResult>>()
       .mockResolvedValueOnce({ status: "failed" })
       .mockRejectedValueOnce(new Error("network down"))
       .mockResolvedValue(ok(4));
@@ -103,7 +103,7 @@ describe("polling the inbox", () => {
   });
 
   it("stops checking once the person is no longer signed in", async () => {
-    const check = vi.fn(async (): Promise<CheckOutcome> => ({
+    const check = vi.fn(async (): Promise<PollResult> => ({
       status: "signed-out",
     }));
     start(check);
@@ -111,8 +111,8 @@ describe("polling the inbox", () => {
     await vi.advanceTimersByTimeAsync(MINUTE);
     expect(check).toHaveBeenCalledTimes(1);
 
-    page.setHidden(true);
-    page.setHidden(false);
+    visibility.setHidden(true);
+    visibility.setHidden(false);
     await vi.advanceTimersByTimeAsync(10 * MINUTE);
     expect(check).toHaveBeenCalledTimes(1);
   });
@@ -133,7 +133,7 @@ describe("polling the inbox", () => {
   });
 
   it("doesn't start checking while the tab starts hidden", async () => {
-    page.hidden = true;
+    visibility.hidden = true;
     const check = vi.fn(async () => ok(1));
     start(check);
 
@@ -151,28 +151,27 @@ function item(id: number, overrides: Partial<InboxItem> = {}): InboxItem {
     outcome: null,
     href: "/admin/refunds",
     sentAt: "2026-10-06T12:00:00.000Z",
-    timeAgo: "just now",
-    group: "today",
     isRead: false,
     ...overrides,
   };
 }
 
-describe("finding the newest item the panel holds", () => {
-  it("looks across both tabs, so a check's new item counts as seen", () => {
-    const unread = [item(9, { sentAt: "2026-10-06T12:05:00.000Z" })];
-    const all = [item(7, { sentAt: "2026-10-06T12:00:00.000Z" })];
+describe("finding the newest item showing", () => {
+  it("goes by send time, wherever the item sits in the list", () => {
+    const showing = [
+      item(7, { sentAt: "2026-10-06T12:00:00.000Z" }),
+      item(9, { sentAt: "2026-10-06T12:05:00.000Z" }),
+    ];
 
-    expect(newestItem(unread, all)?.id).toBe(9);
-    expect(newestItem(all, unread)?.id).toBe(9);
+    expect(newestItem(showing)?.id).toBe(9);
   });
 
   it("breaks a tie on send time by the later id", () => {
-    expect(newestItem([item(3)], [item(4)])?.id).toBe(4);
+    expect(newestItem([item(3), item(4)])?.id).toBe(4);
   });
 
-  it("has none when both tabs are empty", () => {
-    expect(newestItem([], [])).toBeUndefined();
+  it("has none when nothing is showing", () => {
+    expect(newestItem([])).toBeUndefined();
   });
 });
 
@@ -181,7 +180,7 @@ describe("merging a check into the list showing", () => {
     const showing = [item(2), item(1)];
 
     expect(
-      mergeInboxItems(showing, [item(4), item(3), item(2), item(1)]).map(
+      mergeInboxItems(showing, [item(4), item(3), item(2), item(1)], "all").map(
         (i) => i.id
       )
     ).toEqual([4, 3, 2, 1]);
@@ -191,18 +190,42 @@ describe("merging a check into the list showing", () => {
     const showing = [item(3), item(2), item(1)];
 
     expect(
-      mergeInboxItems(showing, [item(5), item(1)]).map((i) => i.id)
+      mergeInboxItems(showing, [item(5), item(1)], "all").map((i) => i.id)
     ).toEqual([5, 3, 2, 1]);
   });
 
-  it("refreshes the details of items already showing", () => {
-    const showing = [item(2, { timeAgo: "just now" }), item(1)];
+  it("shows an item that left the Unread tab as read, in its place", () => {
+    const showing = [item(2), item(1)];
 
-    const merged = mergeInboxItems(showing, [
-      item(2, { timeAgo: "1m ago", isRead: true }),
-      item(1),
+    const merged = mergeInboxItems(showing, [item(1)], "unread");
+
+    expect(merged.map((i) => [i.id, i.isRead])).toEqual([
+      [2, true],
+      [1, false],
     ]);
+  });
 
-    expect(merged[0]).toMatchObject({ id: 2, timeAgo: "1m ago", isRead: true });
+  it("leaves an item that dropped off the All tab as it was", () => {
+    const showing = [item(2), item(1)];
+
+    const merged = mergeInboxItems(showing, [item(3), item(2)], "all");
+
+    expect(merged.map((i) => [i.id, i.isRead])).toEqual([
+      [3, false],
+      [2, false],
+      [1, false],
+    ]);
+  });
+
+  it("refreshes the details of items already showing", () => {
+    const showing = [item(2), item(1)];
+
+    const merged = mergeInboxItems(
+      showing,
+      [item(2, { isRead: true }), item(1)],
+      "all"
+    );
+
+    expect(merged[0]).toMatchObject({ id: 2, isRead: true });
   });
 });

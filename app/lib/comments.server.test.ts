@@ -174,7 +174,7 @@ describe("postComment", () => {
     });
 
     function inbox(userId: number) {
-      return listInbox(db, userId, "all", NOW).map(({ text, href }) => ({
+      return listInbox(db, userId, "all").map(({ text, href }) => ({
         text,
         href,
       }));
