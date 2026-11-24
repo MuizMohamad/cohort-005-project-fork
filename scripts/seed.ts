@@ -104,7 +104,7 @@ async function seed() {
   }
 
   // ─── Users ───
-  // 1 admin, 3 instructors (one of whom owns no courses, so the empty
+  // 2 admins, 3 instructors (one of whom owns no courses, so the empty
   // instructor dashboard is reachable), and ~40 students.
   //
   // Students are split in two: the five named students below, who own all the
@@ -122,6 +122,19 @@ async function seed() {
       role: UserRole.Admin,
       avatarUrl: "https://api.dicebear.com/9.x/avataaars/svg?seed=alex",
       createdAt: daysAgo(120),
+    })
+    .returning()
+    .all();
+
+  // A second Platform Admin, so one can see the other's refund decisions.
+  const [secondAdmin] = db
+    .insert(schema.users)
+    .values({
+      name: "Sam Okafor",
+      email: "sam.okafor@ralph.dev",
+      role: UserRole.Admin,
+      avatarUrl: "https://api.dicebear.com/9.x/avataaars/svg?seed=sam",
+      createdAt: daysAgo(90),
     })
     .returning()
     .all();
@@ -268,7 +281,7 @@ async function seed() {
   const studentCount = allStudents.length;
 
   console.log(
-    `Created ${1 + instructorCount + studentCount} users (1 admin, ${instructorCount} instructors, ${studentCount} students).`
+    `Created ${2 + instructorCount + studentCount} users (2 admins, ${instructorCount} instructors, ${studentCount} students).`
   );
 
   // ─── Categories ───
@@ -2774,13 +2787,27 @@ This course is still in draft while the cluster examples are rewritten against t
       updatedAt: daysAgo(6),
     })
     .run();
+  // Sam declined Liam's first try, so Liam asked again with more detail.
+  const declinedNote =
+    "Could you tell us which course you meant to buy? Happy to look again once we know.";
   db.insert(schema.refunds)
-    .values({
-      purchaseId: liamPurchase.id,
-      status: RefundStatus.Open,
-      reason: "Bought the wrong one, I meant the advanced course.",
-      requestedAt: daysAgo(4),
-    })
+    .values([
+      {
+        purchaseId: liamPurchase.id,
+        status: RefundStatus.Declined,
+        reason: "Not for me.",
+        requestedAt: daysAgo(8),
+        decisionNote: declinedNote,
+        resolvedAt: daysAgo(7),
+        resolvedByUserId: secondAdmin.id,
+      },
+      {
+        purchaseId: liamPurchase.id,
+        status: RefundStatus.Open,
+        reason: "Bought the wrong one, I meant the advanced course.",
+        requestedAt: daysAgo(4),
+      },
+    ])
     .run();
 
   console.log("Created Liam's Refund Request.");
@@ -2818,6 +2845,52 @@ This course is still in draft while the cluster examples are rewritten against t
       },
       {
         recipientId: admin.id,
+        kind: NotificationKind.RefundRequestRaised,
+        actorName: marta.name,
+        courseTitle: course3.title,
+        href: "/admin/refunds",
+        sentAt: daysAgo(1),
+        readAt: null,
+      },
+    ])
+    .run();
+
+  // Sam's decline of Liam's first Refund Request: Liam hears the outcome and
+  // note, Alex hears who decided. Sam also has the two open requests unread.
+  db.insert(schema.notifications)
+    .values([
+      {
+        recipientId: liam.id,
+        kind: NotificationKind.RefundRequestDecided,
+        actorName: secondAdmin.name,
+        courseTitle: course1.title,
+        outcome: RefundStatus.Declined,
+        note: declinedNote,
+        href: `/courses/${course1.slug}`,
+        sentAt: daysAgo(7),
+        readAt: daysAgo(6),
+      },
+      {
+        recipientId: admin.id,
+        kind: NotificationKind.RefundRequestDecidedByOther,
+        actorName: secondAdmin.name,
+        courseTitle: course1.title,
+        outcome: RefundStatus.Declined,
+        href: "/admin/refunds",
+        sentAt: daysAgo(7),
+        readAt: null,
+      },
+      {
+        recipientId: secondAdmin.id,
+        kind: NotificationKind.RefundRequestRaised,
+        actorName: liam.name,
+        courseTitle: course1.title,
+        href: "/admin/refunds",
+        sentAt: daysAgo(4),
+        readAt: null,
+      },
+      {
+        recipientId: secondAdmin.id,
         kind: NotificationKind.RefundRequestRaised,
         actorName: marta.name,
         courseTitle: course3.title,
