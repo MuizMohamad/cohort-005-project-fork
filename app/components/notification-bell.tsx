@@ -1,6 +1,6 @@
 import { Form } from "react-router";
 import { useState } from "react";
-import { Bell, Inbox as InboxIcon, Receipt, X } from "lucide-react";
+import { Bell, Inbox as InboxIcon, Receipt, UserPlus, X } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { NotificationKind } from "~/db/schema";
 import type { InboxItem, InboxTab } from "~/lib/notifications.server";
@@ -15,6 +15,8 @@ function KindIcon({ kind }: { kind: NotificationKind }) {
   switch (kind) {
     case NotificationKind.RefundRequestRaised:
       return <Receipt className="size-4 shrink-0 text-muted-foreground" />;
+    case NotificationKind.SeatClaimed:
+      return <UserPlus className="size-4 shrink-0 text-muted-foreground" />;
   }
 }
 

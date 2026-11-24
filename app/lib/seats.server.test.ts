@@ -4,6 +4,7 @@ import * as schema from "~/db/schema";
 import { UserRole } from "~/db/schema";
 import { approveRefundRequest, raiseRefundRequest } from "./refunds.server";
 import { claimSeat } from "./seats.server";
+import { listInbox } from "./notifications.server";
 
 type TestDb = ReturnType<typeof createTestDb>;
 
@@ -156,5 +157,21 @@ describe("claimSeat", () => {
     expect(claimSeat(db, seat.code, addUser("Sam").id, "NZ", NOW).ok).toBe(
       true
     );
+  });
+});
+
+describe("claimSeat notifications", () => {
+  it("tells the Team Admin who bought the Team Licence which Student claimed it", () => {
+    const seat = buySeat();
+    const student = addUser("Sam");
+
+    claimSeat(db, seat.code, student.id, "AU", NOW);
+
+    expect(listInbox(db, teamAdmin.id, "unread", NOW)).toEqual([
+      expect.objectContaining({
+        text: `Sam claimed a seat on ${base.course.title}`,
+        href: "/team",
+      }),
+    ]);
   });
 });
