@@ -88,6 +88,16 @@ describe("listing the inbox", () => {
     ).toEqual(["just now", "8m ago", "5h ago", "3d ago"]);
   });
 
+  it("puts items sent since midnight in Today and the rest in Earlier", () => {
+    raised("Last Night", 12 * 60 + 1);
+    raised("Just After Midnight", 11 * 60 + 59);
+    raised("This Morning", 60);
+
+    expect(
+      listInbox(db, platformAdmin.id, "all", NOW).map((item) => item.group)
+    ).toEqual(["today", "today", "earlier"]);
+  });
+
   it("keeps the names it was sent with after a rename", () => {
     raised("Intro to SQL");
     db.update(schema.users).set({ name: "Samantha" }).run();

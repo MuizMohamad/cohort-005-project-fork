@@ -74,6 +74,14 @@ function timeAgo(sentAtIso: string, now: Date): string {
   return `${Math.floor(minutes / (60 * 24))}d ago`;
 }
 
+export type InboxGroup = "today" | "earlier";
+
+function groupOf(sentAtIso: string, now: Date): InboxGroup {
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  return new Date(sentAtIso) >= midnight ? "today" : "earlier";
+}
+
 export type InboxTab = "unread" | "all";
 
 export type InboxItem = {
@@ -83,6 +91,7 @@ export type InboxItem = {
   href: string;
   sentAt: string;
   timeAgo: string;
+  group: InboxGroup;
   isRead: boolean;
 };
 
@@ -116,6 +125,7 @@ export function listInbox(
     href: row.href,
     sentAt: row.sentAt,
     timeAgo: timeAgo(row.sentAt, now),
+    group: groupOf(row.sentAt, now),
     isRead: row.readAt !== null,
   }));
 }
