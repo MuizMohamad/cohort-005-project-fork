@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
-import { LessonProgressStatus, RefundStatus, UserRole } from "~/db/schema";
+import {
+  LessonProgressStatus,
+  NotificationKind,
+  RefundStatus,
+  UserRole,
+} from "~/db/schema";
+import { countUnread, listInbox } from "./notifications.server";
 import {
   approveRefundRequest,
   checkRefundRequest,
@@ -166,6 +172,28 @@ describe("raising a Refund Request", () => {
     expect(result).toMatchObject({ ok: true, kind: "individual_purchase" });
   });
 
+  it("emails the buyer that the request was received, without the reason", () => {
+    const purchase = buyForSelf(base.user.id);
+
+    const result = raiseRefundRequest(db, purchase.id, base.user.id, "Nope.", NOW);
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.email).toEqual({
+      to: "test@example.com",
+      subject: "Refund requested — Test Course",
+      body: [
+        "Hi Test User,",
+        "",
+        'We have your refund request for "Test Course".',
+        "The refund is for $79.00, the amount you paid.",
+        "",
+        "Our team reviews every refund request by hand. You do not need to do anything else — we will email you again when it is done.",
+        "",
+        "— The Cadence team",
+      ].join("\n"),
+    });
+  });
+
   it("refuses anyone but the buyer", () => {
     const purchase = buyForSelf(base.user.id);
     const someoneElse = addLearner("Ben");
@@ -234,6 +262,74 @@ describe("raising a Refund Request", () => {
       ok: false,
       status: 403,
     });
+  });
+});
+
+describe("notifying Platform Admins of a new Refund Request", () => {
+  function addPlatformAdmin(name: string) {
+    return db
+      .insert(schema.users)
+      .values({
+        name,
+        email: `${name.toLowerCase()}@example.com`,
+        role: UserRole.Admin,
+      })
+      .returning()
+      .get();
+  }
+
+  it("tells every Platform Admin who asked, about which course", () => {
+    const secondAdmin = addPlatformAdmin("Quinn");
+    const purchase = buyForSelf(base.user.id);
+
+    raise(purchase.id, base.user.id);
+
+    for (const admin of [platformAdmin, secondAdmin]) {
+      expect(listInbox(db, admin.id, "unread", NOW)).toMatchObject([
+        {
+          kind: NotificationKind.RefundRequestRaised,
+          text: "Test User asked for a refund on Test Course",
+          href: "/admin/refunds",
+          isRead: false,
+        },
+      ]);
+    }
+  });
+
+  it("never shows the buyer's reason", () => {
+    const purchase = buyForSelf(base.user.id);
+
+    raise(purchase.id, base.user.id);
+
+    const [item] = listInbox(db, platformAdmin.id, "all", NOW);
+    expect(JSON.stringify(item)).not.toContain("It was not what I expected.");
+  });
+
+  it("tells nobody else, and not the buyer", () => {
+    const purchase = buyForSelf(base.user.id);
+
+    raise(purchase.id, base.user.id);
+
+    expect(countUnread(db, base.user.id)).toBe(0);
+    expect(countUnread(db, base.instructor.id)).toBe(0);
+  });
+
+  it("leaves out a Platform Admin who raised it on their own Purchase", () => {
+    const purchase = buyForSelf(platformAdmin.id);
+    const otherAdmin = addPlatformAdmin("Quinn");
+
+    raise(purchase.id, platformAdmin.id);
+
+    expect(countUnread(db, platformAdmin.id)).toBe(0);
+    expect(countUnread(db, otherAdmin.id)).toBe(1);
+  });
+
+  it("sends nothing when the request is refused", () => {
+    const purchase = buyForSelf(base.user.id, 20);
+
+    raiseRefundRequest(db, purchase.id, base.user.id, "Too late?", NOW);
+
+    expect(countUnread(db, platformAdmin.id)).toBe(0);
   });
 });
 

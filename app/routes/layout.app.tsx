@@ -5,6 +5,7 @@ import { DevUI } from "~/components/dev-ui";
 import { Toaster } from "sonner";
 import { getCurrentUserId, getDevCountry } from "~/lib/session";
 import { getCountryTierInfo, COUNTRIES } from "~/lib/ppp";
+import { countUnread, listInbox } from "~/lib/notifications.server";
 import { eq, and, or, sql, desc } from "drizzle-orm";
 import { db } from "~/db";
 import {
@@ -177,6 +178,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const currentUser = currentUserId ? getUserById(currentUserId) : null;
   const devCountry = await getDevCountry(request);
   const countryTierInfo = getCountryTierInfo(devCountry);
+  const now = new Date();
 
   const recentCourses = currentUserId
     ? getRecentlyProgressedCourses(currentUserId).map((course) => {
@@ -213,6 +215,14 @@ export async function loader({ request }: Route.LoaderArgs) {
     countryTierInfo,
     countries: COUNTRIES,
     isTeamAdmin: currentUserId ? isTeamAdmin(currentUserId) : false,
+    // Read on every page load, page change and save, so the bell stays current.
+    inbox: currentUserId
+      ? {
+          unreadCount: countUnread(db, currentUserId),
+          unread: listInbox(db, currentUserId, "unread", now),
+          all: listInbox(db, currentUserId, "all", now),
+        }
+      : null,
   };
 }
 
@@ -225,6 +235,7 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
     countryTierInfo,
     countries,
     isTeamAdmin: userIsTeamAdmin,
+    inbox,
   } = loaderData;
 
   return (
@@ -233,6 +244,7 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
         currentUser={currentUser}
         recentCourses={recentCourses}
         isTeamAdmin={userIsTeamAdmin}
+        inbox={inbox}
       />
       <main className="flex-1 overflow-y-auto">
         <Outlet />

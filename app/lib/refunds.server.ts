@@ -17,6 +17,7 @@ import {
   RefundStatus,
 } from "~/db/schema";
 import { formatPrice } from "~/lib/utils";
+import { sendRefundRequestRaised } from "~/lib/notifications.server";
 import {
   REFUND_COMPLETION_LIMIT,
   REFUND_WATCH_LIMIT_SECONDS,
@@ -354,6 +355,11 @@ export type RaiseResult =
   | { ok: true; refundRequestId: number; kind: PurchaseKind; email: Email }
   | Failure;
 
+/**
+ * Raises a Refund Request and tells the Platform Admins, in one save. The
+ * buyer's email is returned for the caller to send after the save, so a failed
+ * send never undoes it.
+ */
 export function raiseRefundRequest(
   db: Db,
   purchaseId: number,
@@ -361,50 +367,62 @@ export function raiseRefundRequest(
   reason: string,
   now: Date
 ): RaiseResult {
-  const check = checkRefundRequest(db, purchaseId, buyerId, now);
-  if (!check.ok) return check;
+  return db.transaction((tx): RaiseResult => {
+    const check = checkRefundRequest(tx, purchaseId, buyerId, now);
+    if (!check.ok) return check;
 
-  const { purchase } = check;
-  const buyer = db.select().from(users).where(eq(users.id, buyerId)).get();
-  const course = db
-    .select()
-    .from(courses)
-    .where(eq(courses.id, purchase.courseId))
-    .get();
+    const { purchase } = check;
+    const buyer = tx.select().from(users).where(eq(users.id, buyerId)).get();
+    const course = tx
+      .select()
+      .from(courses)
+      .where(eq(courses.id, purchase.courseId))
+      .get();
 
-  if (!buyer || !course) {
-    return { ok: false, status: 404, error: "Purchase not found." };
-  }
+    if (!buyer || !course) {
+      return { ok: false, status: 404, error: "Purchase not found." };
+    }
 
-  const refundRequest = db
-    .insert(refunds)
-    .values({
-      purchaseId: purchase.id,
-      status: RefundStatus.Open,
-      reason,
-      requestedAt: now.toISOString(),
-    })
-    .returning()
-    .get();
+    const refundRequest = tx
+      .insert(refunds)
+      .values({
+        purchaseId: purchase.id,
+        status: RefundStatus.Open,
+        reason,
+        requestedAt: now.toISOString(),
+      })
+      .returning()
+      .get();
 
+    sendRefundRequestRaised(tx, buyer.id, buyer.name, course.title, now);
+
+    return {
+      ok: true,
+      refundRequestId: refundRequest.id,
+      kind: kindOf(getSeats(tx, purchase.id)),
+      email: buildRequestedEmail(buyer, course, purchase),
+    };
+  });
+}
+
+function buildRequestedEmail(
+  buyer: typeof users.$inferSelect,
+  course: typeof courses.$inferSelect,
+  purchase: Purchase
+): Email {
   return {
-    ok: true,
-    refundRequestId: refundRequest.id,
-    kind: kindOf(getSeats(db, purchase.id)),
-    email: {
-      to: buyer.email,
-      subject: `Refund requested — ${course.title}`,
-      body: [
-        `Hi ${buyer.name},`,
-        "",
-        `We have your refund request for "${course.title}".`,
-        `The refund is for ${formatPrice(purchase.amountPaid)}, the amount you paid.`,
-        "",
-        "Our team reviews every refund request by hand. You do not need to do anything else — we will email you again when it is done.",
-        "",
-        "— The Cadence team",
-      ].join("\n"),
-    },
+    to: buyer.email,
+    subject: `Refund requested — ${course.title}`,
+    body: [
+      `Hi ${buyer.name},`,
+      "",
+      `We have your refund request for "${course.title}".`,
+      `The refund is for ${formatPrice(purchase.amountPaid)}, the amount you paid.`,
+      "",
+      "Our team reviews every refund request by hand. You do not need to do anything else — we will email you again when it is done.",
+      "",
+      "— The Cadence team",
+    ].join("\n"),
   };
 }
 

@@ -13,6 +13,7 @@ import {
   RefundStatus,
   QuestionType,
   TeamMemberRole,
+  NotificationKind,
 } from "../app/db/schema";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -65,6 +66,7 @@ async function seed() {
 
   // Drop and recreate tables for a clean seed
   sqlite.exec(`
+    DROP TABLE IF EXISTS notifications;
     DROP TABLE IF EXISTS comments;
     DROP TABLE IF EXISTS course_ratings;
     DROP TABLE IF EXISTS video_watch_events;
@@ -2797,6 +2799,36 @@ This course is still in draft while the cluster examples are rewritten against t
     .run();
 
   console.log("Created Marta's Refund Request on her Team Licence.");
+
+  // ─── Notifications ───
+  // The Platform Admin's inbox for the two Refund Requests above: Liam's
+  // already read, Marta's still unread.
+
+  const marta = studentByEmail("marta.novak@student.dev");
+  db.insert(schema.notifications)
+    .values([
+      {
+        recipientId: admin.id,
+        kind: NotificationKind.RefundRequestRaised,
+        actorName: liam.name,
+        courseTitle: course1.title,
+        href: "/admin/refunds",
+        sentAt: daysAgo(4),
+        readAt: daysAgo(3),
+      },
+      {
+        recipientId: admin.id,
+        kind: NotificationKind.RefundRequestRaised,
+        actorName: marta.name,
+        courseTitle: course3.title,
+        href: "/admin/refunds",
+        sentAt: daysAgo(1),
+        readAt: null,
+      },
+    ])
+    .run();
+
+  console.log(`Created ${countRows(schema.notifications)} notifications.`);
 
   // ─── Flush watch events ───
   // Batched: the heartbeat makes these by far the largest table, and one

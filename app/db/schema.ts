@@ -42,6 +42,10 @@ export enum TeamMemberRole {
   Member = "member",
 }
 
+export enum NotificationKind {
+  RefundRequestRaised = "refund_request_raised",
+}
+
 // ─── Tables ───
 
 export const users = sqliteTable("users", {
@@ -357,6 +361,31 @@ export const comments = sqliteTable(
   (table) => [
     index("comments_lesson_idx").on(table.lessonId),
     index("comments_parent_idx").on(table.parentId),
+  ]
+);
+
+// One row per recipient, so each person's read state is their own. Names are
+// copied in at send time so a later rename or a deleted lesson doesn't change
+// what an old notification says. The wording is built when shown, not stored.
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    recipientId: integer("recipient_id")
+      .notNull()
+      .references(() => users.id),
+    kind: text("kind").notNull().$type<NotificationKind>(),
+    // Who caused it: the buyer, the decider, the Student, the author.
+    actorName: text("actor_name").notNull(),
+    courseTitle: text("course_title").notNull(),
+    // Stored as-is and opened as-is, even if the page no longer exists.
+    href: text("href").notNull(),
+    sentAt: text("sent_at").notNull(),
+    // Null while unread.
+    readAt: text("read_at"),
+  },
+  (table) => [
+    index("notifications_recipient_idx").on(table.recipientId, table.sentAt),
   ]
 );
 
