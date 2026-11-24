@@ -2828,6 +2828,31 @@ This course is still in draft while the cluster examples are rewritten against t
     ])
     .run();
 
+  // Bossy's inbox for the two Seats claimed on his Team Licence above:
+  // Olivia's already read, Liam's still unread.
+  db.insert(schema.notifications)
+    .values([
+      {
+        recipientId: bossy.id,
+        kind: NotificationKind.SeatClaimed,
+        actorName: studentByEmail("olivia.martinez@student.dev").name,
+        courseTitle: course2.title,
+        href: "/team",
+        sentAt: daysAgo(30),
+        readAt: daysAgo(29),
+      },
+      {
+        recipientId: bossy.id,
+        kind: NotificationKind.SeatClaimed,
+        actorName: liam.name,
+        courseTitle: course2.title,
+        href: "/team",
+        sentAt: daysAgo(25),
+        readAt: null,
+      },
+    ])
+    .run();
+
   console.log(`Created ${countRows(schema.notifications)} notifications.`);
 
   // ─── Flush watch events ───
