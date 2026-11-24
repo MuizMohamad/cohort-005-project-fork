@@ -1,4 +1,4 @@
-import type { InboxCheck, InboxItem } from "./notifications.server";
+import type { InboxCheck, InboxItem, InboxTab } from "./notifications.server";
 
 // ─── Inbox polling ───
 // Keeps the bell fresh in the browser without a live connection. Runs in the
@@ -62,6 +62,25 @@ export function startInboxPolling(
 
   return { checkNow: runCheck, stop };
 }
+
+export async function fetchInboxCheck(
+  tab: InboxTab | null
+): Promise<CheckOutcome> {
+  const response = await fetch(
+    tab ? `/api/notifications?tab=${tab}` : "/api/notifications"
+  );
+  if (response.status === 401) return { status: "signed-out" };
+  if (!response.ok) return { status: "failed" };
+  return { status: "ok", check: await response.json() };
+}
+
+export const documentPage: Page = {
+  isHidden: () => document.visibilityState === "hidden",
+  onVisibilityChange(listener) {
+    document.addEventListener("visibilitychange", listener);
+    return () => document.removeEventListener("visibilitychange", listener);
+  },
+};
 
 /**
  * Folds a check's list into the list the panel is showing. New items go on

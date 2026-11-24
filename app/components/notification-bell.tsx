@@ -1,7 +1,13 @@
 import { Form } from "react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bell, Inbox as InboxIcon, Receipt, X } from "lucide-react";
 import { cn } from "~/lib/utils";
+import {
+  documentPage,
+  fetchInboxCheck,
+  mergeInboxItems,
+  startInboxPolling,
+} from "~/lib/inbox-polling";
 import { NotificationKind } from "~/db/schema";
 import type { InboxItem, InboxTab } from "~/lib/notifications.server";
 
@@ -73,12 +79,15 @@ function NotificationRow({
 
 function NotificationPanel({
   inbox,
+  tab,
+  setTab,
   onClose,
 }: {
   inbox: Inbox;
+  tab: InboxTab;
+  setTab: (tab: InboxTab) => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<InboxTab>("unread");
   const items = tab === "unread" ? inbox.unread : inbox.all;
 
   return (
@@ -130,13 +139,55 @@ function NotificationPanel({
   );
 }
 
-export function NotificationBell({ inbox }: { inbox: Inbox }) {
+/**
+ * The layout loader's inbox, kept fresh between page loads by the background
+ * check. While the panel is open the check also brings that tab's list.
+ */
+function useLiveInbox(inbox: Inbox, openTab: InboxTab | null): Inbox {
+  const [live, setLive] = useState(inbox);
+  const openTabRef = useRef(openTab);
+  const pollingRef = useRef<ReturnType<typeof startInboxPolling>>(null);
+
+  useEffect(() => setLive(inbox), [inbox]);
+
+  useEffect(() => {
+    openTabRef.current = openTab;
+    if (openTab) pollingRef.current?.checkNow();
+  }, [openTab]);
+
+  useEffect(() => {
+    const polling = startInboxPolling(
+      () => fetchInboxCheck(openTabRef.current),
+      (check) =>
+        setLive((prev) => ({
+          ...prev,
+          unreadCount: check.unreadCount,
+          ...(check.tab &&
+            check.items && {
+              [check.tab]: mergeInboxItems(prev[check.tab], check.items),
+            }),
+        })),
+      documentPage
+    );
+    pollingRef.current = polling;
+    return polling.stop;
+  }, []);
+
+  return live;
+}
+
+export function NotificationBell({ inbox: loadedInbox }: { inbox: Inbox }) {
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<InboxTab>("unread");
+  const inbox = useLiveInbox(loadedInbox, open ? tab : null);
 
   return (
     <>
       <button
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setTab("unread");
+          setOpen(true);
+        }}
         aria-label={`Notifications, ${inbox.unreadCount} unread`}
         className="relative ml-auto rounded-md p-1.5 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
       >
@@ -147,7 +198,12 @@ export function NotificationBell({ inbox }: { inbox: Inbox }) {
         />
       </button>
       {open && (
-        <NotificationPanel inbox={inbox} onClose={() => setOpen(false)} />
+        <NotificationPanel
+          inbox={inbox}
+          tab={tab}
+          setTab={setTab}
+          onClose={() => setOpen(false)}
+        />
       )}
     </>
   );
