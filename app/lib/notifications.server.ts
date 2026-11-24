@@ -64,6 +64,16 @@ function textOf(notification: Notification): string {
   }
 }
 
+function timeAgo(sentAtIso: string, now: Date): string {
+  const minutes = Math.floor(
+    (now.getTime() - new Date(sentAtIso).getTime()) / 60_000
+  );
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60 * 24) return `${Math.floor(minutes / 60)}h ago`;
+  return `${Math.floor(minutes / (60 * 24))}d ago`;
+}
+
 export type InboxTab = "unread" | "all";
 
 export type InboxItem = {
@@ -72,17 +82,23 @@ export type InboxItem = {
   text: string;
   href: string;
   sentAt: string;
+  timeAgo: string;
   isRead: boolean;
 };
 
-/** One tab of a person's inbox, newest first, ready to show. */
+const ALL_TAB_LIMIT = 50;
+
+/**
+ * One tab of a person's inbox, newest first, ready to show. Unread shows every
+ * unread item so nothing unread is hidden; All shows the newest 50.
+ */
 export function listInbox(
   db: Queryable,
   userId: number,
   tab: InboxTab,
   now: Date
 ): InboxItem[] {
-  const rows = db
+  const query = db
     .select()
     .from(notifications)
     .where(
@@ -90,8 +106,8 @@ export function listInbox(
         ? and(eq(notifications.recipientId, userId), isNull(notifications.readAt))
         : eq(notifications.recipientId, userId)
     )
-    .orderBy(desc(notifications.sentAt), desc(notifications.id))
-    .all();
+    .orderBy(desc(notifications.sentAt), desc(notifications.id));
+  const rows = tab === "all" ? query.limit(ALL_TAB_LIMIT).all() : query.all();
 
   return rows.map((row) => ({
     id: row.id,
@@ -99,8 +115,36 @@ export function listInbox(
     text: textOf(row),
     href: row.href,
     sentAt: row.sentAt,
+    timeAgo: timeAgo(row.sentAt, now),
     isRead: row.readAt !== null,
   }));
+}
+
+// ─── Reading ───
+
+/**
+ * Marks one of the person's own notifications read and returns the page it
+ * opens. Null when it isn't theirs, so nobody can read another's inbox.
+ */
+export function markRead(
+  db: Queryable,
+  userId: number,
+  notificationId: number,
+  now: Date
+): { href: string } | null {
+  const own = and(
+    eq(notifications.id, notificationId),
+    eq(notifications.recipientId, userId)
+  );
+  const notification = db.select().from(notifications).where(own).get();
+  if (!notification) return null;
+
+  db.update(notifications)
+    .set({ readAt: now.toISOString() })
+    .where(and(own, isNull(notifications.readAt)))
+    .run();
+
+  return { href: notification.href };
 }
 
 export function countUnread(db: Queryable, userId: number): number {
