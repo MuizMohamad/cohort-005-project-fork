@@ -72,7 +72,9 @@ export async function action({ params, request }: Route.ActionArgs) {
     throw data(result.error, { status: result.status });
   }
 
-  await sendEmail(result.email);
+  // The request and its notifications are already saved; a failed email
+  // doesn't undo them or stop the buyer moving on.
+  await sendEmail(result.email).catch(() => {});
 
   return redirect(result.kind === "team_licence" ? "/team" : "/settings");
 }
