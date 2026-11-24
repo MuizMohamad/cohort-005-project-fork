@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { coupons, enrollments } from "~/db/schema";
 import { getSeatAvailability, type Db } from "~/lib/refunds.server";
 
@@ -45,6 +45,21 @@ export function claimSeat(
     }
     if (availability === "refunded") {
       return { ok: false, error: SEAT_REFUNDED };
+    }
+
+    const existingEnrollment = tx
+      .select()
+      .from(enrollments)
+      .where(
+        and(
+          eq(enrollments.userId, studentId),
+          eq(enrollments.courseId, seat.courseId)
+        )
+      )
+      .get();
+
+    if (existingEnrollment) {
+      return { ok: false, error: "You are already enrolled in this course" };
     }
 
     tx.update(coupons)

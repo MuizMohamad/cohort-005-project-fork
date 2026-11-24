@@ -125,4 +125,18 @@ describe("claimSeat", () => {
         "This seat is no longer available. Ask the person who shared it with you.",
     });
   });
+
+  it("refuses a Student already enrolled in the course and leaves the Seat unclaimed", () => {
+    const student = addUser("Sam");
+    claimSeat(db, buySeat().code, student.id, "AU", NOW);
+    const secondSeat = buySeat();
+
+    expect(claimSeat(db, secondSeat.code, student.id, "AU", NOW)).toEqual({
+      ok: false,
+      error: "You are already enrolled in this course",
+    });
+    expect(
+      claimSeat(db, secondSeat.code, addUser("Kim").id, "AU", NOW).ok
+    ).toBe(true);
+  });
 });
