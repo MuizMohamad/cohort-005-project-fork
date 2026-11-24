@@ -15,6 +15,13 @@ import {
   TeamMemberRole,
   NotificationKind,
 } from "../app/db/schema";
+import {
+  REFUNDS_REVIEW_HREF,
+  TEAM_HREF,
+  UNANSWERED_QUESTIONS_HREF,
+  courseHref,
+  lessonHref,
+} from "../app/lib/notifications.server";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,6 +45,10 @@ function hoursAgo(n: number): string {
   const d = new Date();
   d.setHours(d.getHours() - n);
   return d.toISOString();
+}
+
+function minutesAgo(n: number): string {
+  return new Date(Date.now() - n * 60_000).toISOString();
 }
 
 function slugify(title: string): string {
@@ -1802,7 +1813,8 @@ This course is still in draft while the cluster examples are rewritten against t
   // - James: enrolled in course 1 only (completed)
   // - Olivia: enrolled in both courses (just started course 1, mid-way in course 2)
   // - Liam: enrolled in course 2 only (just started, abandoned)
-  // - Sophia: enrolled in course 1 only (recently enrolled, barely started)
+  // - Sophia: enrolled in course 1 (recently enrolled, barely started); she
+  //   also claims one of Bossy's Seats on course 2 today, further down
 
   db.insert(schema.enrollments)
     .values([
@@ -1924,7 +1936,22 @@ This course is still in draft while the cluster examples are rewritten against t
     lessonId: course1LessonIds[4],
     userId: students[4].id,
     body: "Is there a reason to prefer `interface` over `type` here, or is it purely style?",
-    createdAt: daysAgo(1),
+    createdAt: minutesAgo(25),
+  });
+
+  // Asked and answered today, so Emma and Sarah have something in Today.
+  const c1q7 = comment({
+    lessonId: course1LessonIds[5],
+    userId: students[0].id,
+    body: "Should I be using `unknown` instead of `any` for the parsed JSON here?",
+    createdAt: minutesAgo(90),
+  });
+  comment({
+    lessonId: course1LessonIds[5],
+    userId: instructor1.id,
+    parentId: c1q7.id,
+    body: "Yes — `unknown` makes you narrow it before use, which is exactly what you want for data from outside.",
+    createdAt: minutesAgo(30),
   });
 
   // Another student replied, but no staff has — still counts as unanswered.
@@ -2366,6 +2393,16 @@ This course is still in draft while the cluster examples are rewritten against t
       redeemedAt: daysAgo(25),
     })
     .where(eq(schema.coupons.id, seededCoupons[1].id))
+    .run();
+
+  // Sophia claimed a third Seat today, so Bossy's inbox has something in Today.
+  const sophia = studentByEmail("sophia.davis@student.dev");
+  db.update(schema.coupons)
+    .set({ redeemedByUserId: sophia.id, redeemedAt: minutesAgo(15) })
+    .where(eq(schema.coupons.id, seededCoupons[2].id))
+    .run();
+  db.insert(schema.enrollments)
+    .values({ userId: sophia.id, courseId: course2.id, enrolledAt: minutesAgo(15) })
     .run();
 
   console.log(
@@ -2821,16 +2858,18 @@ This course is still in draft while the cluster examples are rewritten against t
       purchaseId: novakLicence.purchase.id,
       status: RefundStatus.Open,
       reason: "Our design team was reorganised and nobody needs these seats now.",
-      requestedAt: daysAgo(1),
+      requestedAt: minutesAgo(40),
     })
     .run();
 
   console.log("Created Marta's Refund Request on her Team Licence.");
 
   // ─── Notifications ───
-  // The Platform Admin's inbox for the two Refund Requests above: Liam's
-  // already read, Marta's still unread.
+  // What each event above would have sent, so every DevUI user's inbox has
+  // read and unread items, some from today and some older.
 
+  // The Platform Admins' inboxes for the two Refund Requests above: Liam's
+  // already read by Alex, Marta's from today still unread.
   const marta = studentByEmail("marta.novak@student.dev");
   db.insert(schema.notifications)
     .values([
@@ -2839,7 +2878,7 @@ This course is still in draft while the cluster examples are rewritten against t
         kind: NotificationKind.RefundRequestRaised,
         actorName: liam.name,
         courseTitle: course1.title,
-        href: "/admin/refunds",
+        href: REFUNDS_REVIEW_HREF,
         sentAt: daysAgo(4),
         readAt: daysAgo(3),
       },
@@ -2848,8 +2887,8 @@ This course is still in draft while the cluster examples are rewritten against t
         kind: NotificationKind.RefundRequestRaised,
         actorName: marta.name,
         courseTitle: course3.title,
-        href: "/admin/refunds",
-        sentAt: daysAgo(1),
+        href: REFUNDS_REVIEW_HREF,
+        sentAt: minutesAgo(40),
         readAt: null,
       },
     ])
@@ -2866,7 +2905,7 @@ This course is still in draft while the cluster examples are rewritten against t
         courseTitle: course1.title,
         outcome: RefundStatus.Declined,
         note: declinedNote,
-        href: `/courses/${course1.slug}`,
+        href: courseHref(course1.slug),
         sentAt: daysAgo(7),
         readAt: daysAgo(6),
       },
@@ -2876,7 +2915,7 @@ This course is still in draft while the cluster examples are rewritten against t
         actorName: secondAdmin.name,
         courseTitle: course1.title,
         outcome: RefundStatus.Declined,
-        href: "/admin/refunds",
+        href: REFUNDS_REVIEW_HREF,
         sentAt: daysAgo(7),
         readAt: null,
       },
@@ -2885,7 +2924,7 @@ This course is still in draft while the cluster examples are rewritten against t
         kind: NotificationKind.RefundRequestRaised,
         actorName: liam.name,
         courseTitle: course1.title,
-        href: "/admin/refunds",
+        href: REFUNDS_REVIEW_HREF,
         sentAt: daysAgo(4),
         readAt: null,
       },
@@ -2894,15 +2933,15 @@ This course is still in draft while the cluster examples are rewritten against t
         kind: NotificationKind.RefundRequestRaised,
         actorName: marta.name,
         courseTitle: course3.title,
-        href: "/admin/refunds",
-        sentAt: daysAgo(1),
+        href: REFUNDS_REVIEW_HREF,
+        sentAt: minutesAgo(40),
         readAt: null,
       },
     ])
     .run();
 
-  // Bossy's inbox for the two Seats claimed on his Team Licence above:
-  // Olivia's already read, Liam's still unread.
+  // Bossy's inbox for the three Seats claimed on his Team Licence above:
+  // Olivia's already read, Liam's and today's from Sophia still unread.
   db.insert(schema.notifications)
     .values([
       {
@@ -2910,7 +2949,7 @@ This course is still in draft while the cluster examples are rewritten against t
         kind: NotificationKind.SeatClaimed,
         actorName: studentByEmail("olivia.martinez@student.dev").name,
         courseTitle: course2.title,
-        href: "/team",
+        href: TEAM_HREF,
         sentAt: daysAgo(30),
         readAt: daysAgo(29),
       },
@@ -2919,8 +2958,17 @@ This course is still in draft while the cluster examples are rewritten against t
         kind: NotificationKind.SeatClaimed,
         actorName: liam.name,
         courseTitle: course2.title,
-        href: "/team",
+        href: TEAM_HREF,
         sentAt: daysAgo(25),
+        readAt: null,
+      },
+      {
+        recipientId: bossy.id,
+        kind: NotificationKind.SeatClaimed,
+        actorName: sophia.name,
+        courseTitle: course2.title,
+        href: TEAM_HREF,
+        sentAt: minutesAgo(15),
         readAt: null,
       },
     ])
@@ -2953,7 +3001,7 @@ This course is still in draft while the cluster examples are rewritten against t
       actorName: author.name,
       courseTitle: course.title,
       lessonTitle: lessonTitle(lessonId),
-      href: "/instructor/questions",
+      href: UNANSWERED_QUESTIONS_HREF,
       sentAt,
       readAt,
     };
@@ -2973,7 +3021,7 @@ This course is still in draft while the cluster examples are rewritten against t
       actorName: answerer.name,
       courseTitle: course.title,
       lessonTitle: lessonTitle(lessonId),
-      href: `/courses/${course.slug}/lessons/${lessonId}`,
+      href: lessonHref(course.slug, lessonId),
       sentAt,
       readAt,
     };
@@ -3018,7 +3066,23 @@ This course is still in draft while the cluster examples are rewritten against t
         students[4],
         course1,
         course1LessonIds[4],
-        daysAgo(1),
+        minutesAgo(25),
+        null
+      ),
+      questionAsked(
+        instructor1.id,
+        students[0],
+        course1,
+        course1LessonIds[5],
+        minutesAgo(90),
+        minutesAgo(30)
+      ),
+      questionAnswered(
+        students[0].id,
+        instructor1,
+        course1,
+        course1LessonIds[5],
+        minutesAgo(30),
         null
       ),
       questionAsked(
