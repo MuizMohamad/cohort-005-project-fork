@@ -120,6 +120,29 @@ export function listInbox(
   }));
 }
 
+export type InboxCheck = {
+  unreadCount: number;
+  tab: InboxTab | null;
+  items: InboxItem[] | null;
+};
+
+/**
+ * What the browser's background check gets: the unread count and, when a tab
+ * is asked for (the panel is open on it), that tab of the inbox.
+ */
+export function checkInbox(
+  db: Queryable,
+  userId: number,
+  tab: InboxTab | null,
+  now: Date
+): InboxCheck {
+  return {
+    unreadCount: countUnread(db, userId),
+    tab,
+    items: tab ? listInbox(db, userId, tab, now) : null,
+  };
+}
+
 // ─── Reading ───
 
 /**

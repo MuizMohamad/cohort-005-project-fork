@@ -3,6 +3,7 @@ import { createTestDb } from "~/test/setup";
 import * as schema from "~/db/schema";
 import { UserRole } from "~/db/schema";
 import {
+  checkInbox,
   countUnread,
   listInbox,
   markRead,
@@ -94,6 +95,44 @@ describe("listing the inbox", () => {
     expect(listInbox(db, platformAdmin.id, "all", NOW)[0].text).toBe(
       "Sam asked for a refund on Intro to SQL"
     );
+  });
+});
+
+describe("checking the inbox", () => {
+  it("gives only the unread count when no tab is asked for", () => {
+    raised("Intro to SQL");
+    raised("Advanced SQL");
+
+    expect(checkInbox(db, platformAdmin.id, null, NOW)).toEqual({
+      unreadCount: 2,
+      tab: null,
+      items: null,
+    });
+  });
+
+  it("adds the asked-for tab of the inbox", () => {
+    raised("Intro to SQL", 10);
+    raised("Advanced SQL", 5);
+    const [newest] = listInbox(db, platformAdmin.id, "unread", NOW);
+    markRead(db, platformAdmin.id, newest.id, NOW);
+
+    const check = checkInbox(db, platformAdmin.id, "unread", NOW);
+
+    expect(check.unreadCount).toBe(1);
+    expect(check.tab).toBe("unread");
+    expect(check.items?.map((item) => item.text)).toEqual([
+      "Sam asked for a refund on Intro to SQL",
+    ]);
+  });
+
+  it("only gives that person's own inbox", () => {
+    raised("Intro to SQL");
+
+    expect(checkInbox(db, buyer.id, "all", NOW)).toEqual({
+      unreadCount: 0,
+      tab: "all",
+      items: [],
+    });
   });
 });
 
