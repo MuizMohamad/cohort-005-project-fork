@@ -36,7 +36,7 @@ export function checkCommentBody(body: string) {
   return trimmed;
 }
 
-function getCommentById(db: Queryable, commentId: number) {
+export function getCommentById(db: Queryable, commentId: number) {
   return db.select().from(comments).where(eq(comments.id, commentId)).get();
 }
 
@@ -49,9 +49,10 @@ function isStaff(user: { id: number; role: UserRole }, instructorId: number) {
   return user.id === instructorId || user.role === UserRole.Admin;
 }
 
-function getCourseForLesson(db: Queryable, lessonId: number) {
+export function getCourseForLesson(db: Queryable, lessonId: number) {
   return db
     .select({
+      courseId: courses.id,
       courseTitle: courses.title,
       courseSlug: courses.slug,
       instructorId: courses.instructorId,
