@@ -552,6 +552,100 @@ describe("notifying people of a decided Refund Request", () => {
       }),
     ]);
   });
+
+  it("tells every other Platform Admin the outcome and who decided, but not the decider", () => {
+    const quinn = addPlatformAdmin("Quinn");
+    const rosa = addPlatformAdmin("Rosa");
+    const purchase = buyForSelf(base.user.id);
+    const id = raise(purchase.id, base.user.id);
+    const raisedItemsOnly = listInbox(db, platformAdmin.id, "all", NOW).length;
+
+    declineRefundRequest(db, id, platformAdmin.id, "Past half way.", NOW);
+
+    for (const admin of [quinn, rosa]) {
+      expect(listInbox(db, admin.id, "all", NOW)[0]).toMatchObject({
+        kind: NotificationKind.RefundRequestDecidedByOther,
+        text: "Pat Admin declined the refund on Test Course",
+        outcome: RefundStatus.Declined,
+        secondLine: null,
+        href: "/admin/refunds",
+      });
+    }
+    expect(listInbox(db, platformAdmin.id, "all", NOW)).toHaveLength(
+      raisedItemsOnly
+    );
+    expect(countUnread(db, base.instructor.id)).toBe(0);
+  });
+
+  it("gives a buyer who is also a Platform Admin only the buyer item", () => {
+    const quinn = addPlatformAdmin("Quinn");
+    const purchase = buyForSelf(quinn.id);
+    const id = raise(purchase.id, quinn.id);
+
+    approveRefundRequest(db, id, platformAdmin.id, "Sorted.", NOW);
+
+    expect(
+      listInbox(db, quinn.id, "all", NOW).map((item) => item.kind)
+    ).toEqual([NotificationKind.RefundRequestDecided]);
+  });
+
+  it("tells a Platform Admin nothing about deciding their own Refund Request", () => {
+    const quinn = addPlatformAdmin("Quinn");
+    const purchase = buyForSelf(platformAdmin.id);
+    const id = raise(purchase.id, platformAdmin.id);
+
+    approveRefundRequest(db, id, platformAdmin.id, null, NOW);
+
+    expect(countUnread(db, platformAdmin.id)).toBe(0);
+    expect(listInbox(db, quinn.id, "all", NOW)[0]).toMatchObject({
+      text: "Pat Admin approved the refund on Test Course",
+    });
+  });
+
+  it("never shows the reason or the amount", () => {
+    addPlatformAdmin("Quinn");
+    const purchase = buyForSelf(base.user.id, 3, 4321);
+    const id = raise(purchase.id, base.user.id);
+
+    approveRefundRequest(db, id, platformAdmin.id, "Done.", NOW);
+
+    const items = [
+      ...listInbox(db, base.user.id, "all", NOW),
+      ...listInbox(db, platformAdmin.id, "all", NOW),
+    ];
+    for (const item of items) {
+      expect(JSON.stringify(item)).not.toContain("It was not what I expected.");
+      expect(JSON.stringify(item)).not.toMatch(/43\.21|4321/);
+    }
+  });
+
+  it("sends nothing when the request was already decided", () => {
+    const quinn = addPlatformAdmin("Quinn");
+    const purchase = buyForSelf(base.user.id);
+    const id = raise(purchase.id, base.user.id);
+    approveRefundRequest(db, id, platformAdmin.id, null, NOW);
+    const everyone = [base.user.id, platformAdmin.id, quinn.id];
+    const before = everyone.map((userId) => countUnread(db, userId));
+
+    approveRefundRequest(db, id, quinn.id, null, NOW);
+    declineRefundRequest(db, id, quinn.id, "Too late.", NOW);
+
+    expect(everyone.map((userId) => countUnread(db, userId))).toEqual(before);
+  });
+
+  it("sends nothing when a Team Licence with a Claimed Seat is approved", () => {
+    const quinn = addPlatformAdmin("Quinn");
+    const priya = addLearner("Priya");
+    const { purchase, seats } = buySeats(priya.id, 2);
+    const id = raise(purchase.id, priya.id);
+    claimSeat(seats[0].id, addLearner("Ben").id);
+    const quinnBefore = countUnread(db, quinn.id);
+
+    approveRefundRequest(db, id, platformAdmin.id, null, NOW);
+
+    expect(countUnread(db, priya.id)).toBe(0);
+    expect(countUnread(db, quinn.id)).toBe(quinnBefore);
+  });
 });
 
 describe("listing Refund Requests", () => {
