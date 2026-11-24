@@ -1,7 +1,13 @@
 import { and, desc, eq, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "~/db/schema";
-import { notifications, users, NotificationKind, UserRole } from "~/db/schema";
+import {
+  notifications,
+  users,
+  NotificationKind,
+  RefundStatus,
+  UserRole,
+} from "~/db/schema";
 
 // ─── Notifications ───
 // Each person's in-app inbox. A send function per kind works out who gets it
@@ -53,6 +59,51 @@ export function sendRefundRequestRaised(
       }))
     )
     .run();
+}
+
+/**
+ * The buyer hears the outcome of their Refund Request, with the decision note,
+ * and every other Platform Admin hears who decided it. The decider hears
+ * nothing, and a buyer who is also a Platform Admin gets only the buyer item.
+ */
+export function sendRefundRequestDecided(
+  db: Queryable,
+  buyerId: number,
+  deciderId: number,
+  deciderName: string,
+  courseTitle: string,
+  courseSlug: string,
+  outcome: RefundStatus.Approved | RefundStatus.Declined,
+  note: string | null,
+  now: Date
+) {
+  const sentAt = now.toISOString();
+  const forBuyer = {
+    recipientId: buyerId,
+    kind: NotificationKind.RefundRequestDecided,
+    actorName: deciderName,
+    courseTitle,
+    outcome,
+    note,
+    href: `/courses/${courseSlug}`,
+    sentAt,
+  };
+  const forOtherAdmins = platformAdminIdsExcept(db, deciderId)
+    .filter((recipientId) => recipientId !== buyerId)
+    .map((recipientId) => ({
+      recipientId,
+      kind: NotificationKind.RefundRequestDecidedByOther,
+      actorName: deciderName,
+      courseTitle,
+      outcome,
+      href: "/admin/refunds",
+      sentAt,
+    }));
+
+  const rows = buyerId === deciderId ? forOtherAdmins : [forBuyer, ...forOtherAdmins];
+  if (rows.length === 0) return;
+
+  db.insert(notifications).values(rows).run();
 }
 
 /**
@@ -139,6 +190,10 @@ function textOf(notification: Notification): string {
   switch (notification.kind) {
     case NotificationKind.RefundRequestRaised:
       return `${notification.actorName} asked for a refund on ${notification.courseTitle}`;
+    case NotificationKind.RefundRequestDecided:
+      return `Your refund on ${notification.courseTitle} was ${notification.outcome}`;
+    case NotificationKind.RefundRequestDecidedByOther:
+      return `${notification.actorName} ${notification.outcome} the refund on ${notification.courseTitle}`;
     case NotificationKind.SeatClaimed:
       return `${notification.actorName} claimed a seat on ${notification.courseTitle}`;
     case NotificationKind.QuestionAsked:
@@ -146,6 +201,12 @@ function textOf(notification: Notification): string {
     case NotificationKind.QuestionAnswered:
       return `${notification.actorName} answered a question on ${notification.lessonTitle} in ${notification.courseTitle}`;
   }
+}
+
+function secondLineOf(notification: Notification): string | null {
+  return notification.kind === NotificationKind.RefundRequestDecided
+    ? notification.note
+    : null;
 }
 
 function timeAgo(sentAtIso: string, now: Date): string {
@@ -172,6 +233,9 @@ export type InboxItem = {
   id: number;
   kind: NotificationKind;
   text: string;
+  // Shown small and grey under the text, cut off if long.
+  secondLine: string | null;
+  outcome: RefundStatus.Approved | RefundStatus.Declined | null;
   href: string;
   sentAt: string;
   timeAgo: string;
@@ -206,6 +270,8 @@ export function listInbox(
     id: row.id,
     kind: row.kind,
     text: textOf(row),
+    secondLine: secondLineOf(row),
+    outcome: row.outcome,
     href: row.href,
     sentAt: row.sentAt,
     timeAgo: timeAgo(row.sentAt, now),

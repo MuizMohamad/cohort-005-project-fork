@@ -4,6 +4,8 @@ import {
   Bell,
   Check,
   CheckCheck,
+  CircleCheck,
+  CircleX,
   Inbox as InboxIcon,
   MessageCircleQuestion,
   MessageCircleReply,
@@ -12,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
-import { NotificationKind } from "~/db/schema";
+import { NotificationKind, RefundStatus } from "~/db/schema";
 import type {
   InboxGroup,
   InboxItem,
@@ -25,10 +27,23 @@ export interface Inbox {
   all: InboxItem[];
 }
 
-function KindIcon({ kind }: { kind: NotificationKind }) {
+function KindIcon({
+  kind,
+  outcome,
+}: {
+  kind: NotificationKind;
+  outcome: InboxItem["outcome"];
+}) {
   switch (kind) {
     case NotificationKind.RefundRequestRaised:
       return <Receipt className="size-4 shrink-0 text-muted-foreground" />;
+    case NotificationKind.RefundRequestDecided:
+    case NotificationKind.RefundRequestDecidedByOther:
+      return outcome === RefundStatus.Approved ? (
+        <CircleCheck className="size-4 shrink-0 text-green-600" />
+      ) : (
+        <CircleX className="size-4 shrink-0 text-red-600" />
+      );
     case NotificationKind.SeatClaimed:
       return <UserPlus className="size-4 shrink-0 text-muted-foreground" />;
     case NotificationKind.QuestionAsked:
@@ -100,8 +115,15 @@ function NotificationRow({
               : "bg-blue-50/60 font-medium dark:bg-blue-950/30"
           )}
         >
-          <KindIcon kind={item.kind} />
-          <span className="min-w-0 flex-1 truncate">{item.text}</span>
+          <KindIcon kind={item.kind} outcome={item.outcome} />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate">{item.text}</span>
+            {item.secondLine && (
+              <span className="truncate text-xs font-normal text-muted-foreground">
+                {item.secondLine}
+              </span>
+            )}
+          </span>
           <span className="shrink-0 text-xs font-normal text-muted-foreground">
             {item.timeAgo}
           </span>

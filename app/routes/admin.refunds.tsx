@@ -127,7 +127,9 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ error: result.error }, { status: result.status });
   }
 
-  await sendEmail(result.email);
+  // The decision and its notifications are already saved; a failed email
+  // doesn't undo them or change what the Platform Admin is told.
+  await sendEmail(result.email).catch(() => {});
 
   return {
     success: true,
