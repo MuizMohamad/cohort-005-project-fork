@@ -159,10 +159,7 @@ export function listInbox(
     .from(notifications)
     .where(
       tab === "unread"
-        ? and(
-            eq(notifications.recipientId, userId),
-            isNull(notifications.readAt)
-          )
+        ? and(eq(notifications.recipientId, userId), isNull(notifications.readAt))
         : eq(notifications.recipientId, userId)
     )
     .orderBy(desc(notifications.sentAt), desc(notifications.id));
