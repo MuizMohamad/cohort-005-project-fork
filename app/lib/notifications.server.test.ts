@@ -10,6 +10,7 @@ import {
   listInbox,
   markAllReadUpTo,
   markRead,
+  sendQuestionAsked,
   sendRefundRequestRaised,
 } from "./notifications.server";
 
@@ -130,6 +131,38 @@ describe("listing the inbox", () => {
 
     expect(listInbox(db, platformAdmin.id, "all", NOW)[0].text).toBe(
       "Sam asked for a refund on Intro to SQL"
+    );
+  });
+
+  it("keeps the course title it was sent with after the course is renamed", () => {
+    raised("Intro to SQL");
+    db.update(schema.courses)
+      .set({ title: "SQL for Everyone" })
+      .where(eq(schema.courses.title, "Intro to SQL"))
+      .run();
+
+    expect(listInbox(db, platformAdmin.id, "all", NOW)[0].text).toBe(
+      "Sam asked for a refund on Intro to SQL"
+    );
+  });
+
+  it("keeps its text after its lesson is deleted", () => {
+    const module = db
+      .insert(schema.modules)
+      .values({ courseId: base.course.id, title: "Basics", position: 1 })
+      .returning()
+      .get();
+    const lesson = db
+      .insert(schema.lessons)
+      .values({ moduleId: module.id, title: "Joins", position: 1 })
+      .returning()
+      .get();
+    sendQuestionAsked(db, { authorId: buyer.id, lessonId: lesson.id }, NOW);
+
+    db.delete(schema.lessons).where(eq(schema.lessons.id, lesson.id)).run();
+
+    expect(listInbox(db, base.instructor.id, "all", NOW)[0].text).toBe(
+      "Sam asked a question on Joins in Test Course"
     );
   });
 });
