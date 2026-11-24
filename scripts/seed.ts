@@ -2930,11 +2930,13 @@ This course is still in draft while the cluster examples are rewritten against t
   // posting each Question and Answer would have sent.
 
   function lessonTitle(lessonId: number) {
-    return db
+    const lesson = db
       .select({ title: schema.lessons.title })
       .from(schema.lessons)
       .where(eq(schema.lessons.id, lessonId))
-      .get()!.title;
+      .get();
+    if (!lesson) throw new Error(`No lesson ${lessonId} to notify about`);
+    return lesson.title;
   }
 
   function questionAsked(
