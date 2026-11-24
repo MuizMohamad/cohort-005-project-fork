@@ -44,6 +44,7 @@ export enum TeamMemberRole {
 
 export enum NotificationKind {
   RefundRequestRaised = "refund_request_raised",
+  SeatClaimed = "seat_claimed",
   QuestionAsked = "question_asked",
   QuestionAnswered = "question_answered",
 }

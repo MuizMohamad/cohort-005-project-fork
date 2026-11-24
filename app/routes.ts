@@ -55,4 +55,5 @@ export default [
   route("api/video-tracking", "routes/api.video-tracking.ts"),
   route("api/set-dev-country", "routes/api.set-dev-country.ts"),
   route("api/notifications/:id/read", "routes/api.notifications.$id.read.ts"),
+  route("api/notifications/read-all", "routes/api.notifications.read-all.ts"),
 ] satisfies RouteConfig;
