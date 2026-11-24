@@ -535,6 +535,23 @@ describe("notifying people of a decided Refund Request", () => {
       }),
     ]);
   });
+
+  it("tells the buyer it was declined, with a cross and the note as the second line", () => {
+    const purchase = buyForSelf(base.user.id);
+    const id = raise(purchase.id, base.user.id);
+
+    declineRefundRequest(db, id, platformAdmin.id, "  You finished the course. ", NOW);
+
+    expect(listInbox(db, base.user.id, "unread", NOW)).toEqual([
+      expect.objectContaining({
+        kind: NotificationKind.RefundRequestDecided,
+        text: "Your refund on Test Course was declined",
+        outcome: RefundStatus.Declined,
+        secondLine: "You finished the course.",
+        href: "/courses/test-course",
+      }),
+    ]);
+  });
 });
 
 describe("listing Refund Requests", () => {

@@ -743,6 +743,15 @@ export function declineRefundRequest(
       .where(eq(refunds.id, refundRequestId))
       .run();
 
+    notifyDecision(
+      tx,
+      found.purchase,
+      platformAdminId,
+      RefundStatus.Declined,
+      trimmedNote,
+      now
+    );
+
     return {
       ok: true,
       email: buildDecisionEmail(
