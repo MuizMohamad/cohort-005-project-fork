@@ -5,6 +5,7 @@ import { UserRole } from "~/db/schema";
 import {
   countUnread,
   listInbox,
+  markAllReadUpTo,
   markRead,
   sendRefundRequestRaised,
 } from "./notifications.server";
@@ -130,6 +131,53 @@ describe("marking one read", () => {
       href: "/admin/refunds",
     });
     expect(countUnread(db, platformAdmin.id)).toBe(0);
+  });
+});
+
+describe("marking all read up to an item", () => {
+  it("marks that item and everything older, leaving anything newer unread", () => {
+    raised("Oldest Course", 30);
+    raised("Shown Course", 20);
+    const [newestShown] = listInbox(db, platformAdmin.id, "all", NOW);
+    raised("Newer Course", 5);
+
+    markAllReadUpTo(db, platformAdmin.id, newestShown.id, NOW);
+
+    expect(
+      listInbox(db, platformAdmin.id, "unread", NOW).map((item) => item.text)
+    ).toEqual(["Sam asked for a refund on Newer Course"]);
+  });
+
+  it("goes by when items were sent, not the order they were saved", () => {
+    raised("Shown Course", 20);
+    const [newestShown] = listInbox(db, platformAdmin.id, "all", NOW);
+    raised("Late-saved Older Course", 40);
+
+    markAllReadUpTo(db, platformAdmin.id, newestShown.id, NOW);
+
+    expect(countUnread(db, platformAdmin.id)).toBe(0);
+  });
+
+  it("leaves another person's notifications alone", () => {
+    const otherAdmin = addUser("Quinn", UserRole.Admin);
+    raised("Intro to SQL", 10);
+    const [newestShown] = listInbox(db, platformAdmin.id, "all", NOW);
+
+    markAllReadUpTo(db, platformAdmin.id, newestShown.id, NOW);
+
+    expect(countUnread(db, platformAdmin.id)).toBe(0);
+    expect(countUnread(db, otherAdmin.id)).toBe(1);
+  });
+
+  it("does nothing when the item isn't theirs", () => {
+    const otherAdmin = addUser("Quinn", UserRole.Admin);
+    raised("Intro to SQL", 10);
+    const [theirs] = listInbox(db, otherAdmin.id, "all", NOW);
+
+    markAllReadUpTo(db, platformAdmin.id, theirs.id, NOW);
+
+    expect(countUnread(db, platformAdmin.id)).toBe(1);
+    expect(countUnread(db, otherAdmin.id)).toBe(1);
   });
 });
 
